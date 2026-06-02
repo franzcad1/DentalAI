@@ -36,9 +36,9 @@ def list_appointments(
     if provider_id is not None:
         q = q.filter(Appointment.provider_id == provider_id)
     if date is not None:
-        # SQLite stores datetimes as strings; cast to date for comparison
-        q = q.filter(Appointment.start_time >= f"{date}T00:00:00").filter(
-            Appointment.start_time < f"{date}T23:59:59"
+        # SQLite stores datetimes as "YYYY-MM-DD HH:MM:SS" (space, not T)
+        q = q.filter(Appointment.start_time >= f"{date} 00:00:00").filter(
+            Appointment.start_time <= f"{date} 23:59:59"
         )
     total = q.count()
     items = q.order_by(Appointment.start_time).offset(skip).limit(limit).all()

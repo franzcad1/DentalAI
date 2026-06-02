@@ -184,13 +184,39 @@ def run_seed() -> None:
             )
             db.add(recall)
 
+        # ------------------------------------------------------------------
+        # Today's appointments — so the Schedule view has data on first load
+        # ------------------------------------------------------------------
+        today_appts = 0
+        for _ in range(rng.randint(5, 7)):
+            appt_type = rng.choice(appt_types)
+            start = _random_business_time(today)
+            end = start + timedelta(minutes=appt_type.duration_minutes)
+            # Mix of confirmed/completed/no_show for a realistic day
+            status = rng.choices(
+                ["confirmed", "completed", "no_show"],
+                weights=[0.55, 0.35, 0.10],
+            )[0]
+            appt = Appointment(
+                patient_id=rng.choice(patients).id,
+                provider_id=rng.choice(providers).id,
+                location_id=rng.choice(locations).id,
+                appointment_type_id=appt_type.id,
+                start_time=start,
+                end_time=end,
+                status=status,
+            )
+            db.add(appt)
+            today_appts += 1
+
         db.commit()
         print("Seed complete.")
         print(f"  Providers    : {len(providers)}")
         print(f"  Locations    : {len(locations)}")
         print(f"  Appt types   : {len(appt_types)}")
         print(f"  Patients     : {len(patients)}")
-        print("  Appointments : ~60 days of history")
+        print("  Appointments : ~60 days of history + today")
+        print(f"  Today        : {today_appts} appointments")
         print("  Slots        : 14-day forward grid (weekdays only)")
         print("  Recalls      : 15 overdue + 5 upcoming")
 

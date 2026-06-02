@@ -1,6 +1,18 @@
 version: "3.9"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DentalAI — full stack
+#
+# First boot:
+#   docker-compose up --build
+#
+# The backend entrypoint automatically seeds the SQLite database on first run.
+# Copy backend/.env.example → backend/.env and add your OPENAI_API_KEY before
+# starting if you want the /agent/chat endpoint to be fully functional.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
+  # ── Backend (FastAPI) ─────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -8,14 +20,50 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount source for hot-reload in dev; remove for prod image
-      - ./backend:/app
+      # Persist the SQLite database across container restarts.
+      # The db file lives at /app/dentalai.db inside the container.
+      - dentalai_db:/app
     environment:
       - PYTHONPATH=/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      # Copy backend/.env.example → backend/.env and set OPENAI_API_KEY
+      - ./backend/.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
-  # Redis placeholder — wired up when the AI agent layer is added
+  # ── Redis (agent memory / future task queue) ──────────────────────────────
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ── Frontend (React + Vite dev server) ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser reaches the API at localhost:8000 (host machine port),
+      # not at backend:8000 (internal Docker network).
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  dentalai_db:
+  redis_data:

@@ -20,6 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import appointments, patients, recalls, slots, webhooks
 from app.api.agent_router import router as agent_router
+from app.api.appointment_types import router as appt_types_router
+from app.api.events_router import router as events_router
+from app.api.locations import router as locations_router
+from app.api.providers import router as providers_router
 from app.auth import create_access_token
 from app.db.session import Base, engine
 from app.events.scheduler import start_scheduler, stop_scheduler
@@ -31,22 +35,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ──────────────────────────────────────────────────────────
-    # Create all tables on startup (safe to call repeatedly; no-ops if exist)
     Base.metadata.create_all(bind=engine)
-
-    # Start APScheduler background jobs
     start_scheduler()
-
-    # Print a dev token so you can hit authenticated endpoints immediately
     token = create_access_token()
     logger.info("=" * 60)
     logger.info("DentalAI dev server ready")
     logger.info("Test Bearer token (valid 24 h):")
     logger.info("  %s", token)
     logger.info("=" * 60)
-
-    yield  # ─── server is running ───
-
+    yield
     # ── Shutdown ─────────────────────────────────────────────────────────
     stop_scheduler()
 
@@ -70,7 +67,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Health check — intentionally unauthenticated
     @app.get("/health", tags=["meta"])
     def health() -> dict:
         return {"status": "ok", "version": "0.2.0"}
@@ -81,6 +77,10 @@ def create_app() -> FastAPI:
     app.include_router(slots.router, prefix="/api/v1")
     app.include_router(recalls.router, prefix="/api/v1")
     app.include_router(webhooks.router, prefix="/api/v1")
+    app.include_router(providers_router, prefix="/api/v1")
+    app.include_router(appt_types_router, prefix="/api/v1")
+    app.include_router(locations_router, prefix="/api/v1")
+    app.include_router(events_router, prefix="/api/v1")
 
     # AI agent
     app.include_router(agent_router, prefix="/api/v1")

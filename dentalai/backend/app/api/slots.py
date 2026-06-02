@@ -30,8 +30,8 @@ def list_available_slots(
     if provider_id is not None:
         q = q.filter(AvailableSlot.provider_id == provider_id)
     if date is not None:
-        q = q.filter(AvailableSlot.start_time >= f"{date}T00:00:00").filter(
-            AvailableSlot.start_time < f"{date}T23:59:59"
+        q = q.filter(AvailableSlot.start_time >= f"{date} 00:00:00").filter(
+            AvailableSlot.start_time <= f"{date} 23:59:59"
         )
     if booked is not None:
         q = q.filter(AvailableSlot.is_booked == booked)
