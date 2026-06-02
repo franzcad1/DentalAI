@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_auth
 from app.db.session import get_db
+from app.events.bus import emit_event
 from app.models.orm import Appointment
 from app.models.schemas import (
     AppointmentCreate,
@@ -50,6 +51,21 @@ def create_appointment(_: Auth, db: DB, body: AppointmentCreate) -> NexHealthRes
     db.add(appt)
     db.commit()
     db.refresh(appt)
+
+    # Fire appointment.booked immediately after a successful booking.
+    # emit_event() uses its own session so this is safe even though `db`
+    # is still open here.
+    emit_event(
+        "appointment.booked",
+        {
+            "appointment_id": appt.id,
+            "patient_id": appt.patient_id,
+            "provider_id": appt.provider_id,
+            "start_time": appt.start_time.isoformat(),
+            "appointment_type_id": appt.appointment_type_id,
+        },
+    )
+
     return NexHealthResponse(code=201, description="Created", data=appt)
 
 

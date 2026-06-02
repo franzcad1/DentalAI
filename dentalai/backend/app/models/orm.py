@@ -5,8 +5,9 @@ SQLAlchemy 2.0 evaluates these at runtime via get_type_hints(), which
 requires the union syntax to be evaluable on the target Python version.
 """
 
+import json
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -109,3 +110,36 @@ class PatientRecall(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
 
     patient: Mapped["Patient"] = relationship("Patient", back_populates="recalls")
+
+
+class Event(Base):
+    """Audit log of every event fired by the system.
+
+    payload is stored as a JSON string — use Event.get_payload() /
+    Event.set_payload() helpers rather than accessing the column directly.
+    SQLite doesn't have a native JSON column type; storing as Text keeps
+    the stack simple while still supporting structured data.
+    """
+
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    # JSON-serialised dict stored as text
+    payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fired_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False, index=True
+    )
+    # received | processed | failed
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="received")
+
+    def get_payload(self) -> Dict[str, Any]:
+        """Deserialise the stored JSON payload."""
+        if self.payload is None:
+            return {}
+        return json.loads(self.payload)
+
+    @staticmethod
+    def make_payload(data: Dict[str, Any]) -> str:
+        """Serialise a dict to the JSON text stored in the column."""
+        return json.dumps(data)

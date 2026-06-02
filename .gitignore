@@ -216,3 +216,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Environment files
+.env.local
+.env.development
+.env.production
+
+# Database
+*.db
+dental_ai.db
+
+# Node / React frontend
+node_modules/
+dist/
+.env
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log

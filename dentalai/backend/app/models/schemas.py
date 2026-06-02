@@ -196,6 +196,21 @@ class PatientRecallRead(PatientRecallBase):
 
 
 # ---------------------------------------------------------------------------
+# Event
+# ---------------------------------------------------------------------------
+
+
+class EventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    event_type: str
+    payload: Optional[str] = None
+    fired_at: datetime
+    status: str
+
+
+# ---------------------------------------------------------------------------
 # Webhook simulation
 # ---------------------------------------------------------------------------
 
@@ -209,6 +224,31 @@ class WebhookSimulateResponse(BaseModel):
     received: bool = True
     event_type: str
     message: str
+    event_id: int
+
+
+# ---------------------------------------------------------------------------
+# Agent chat
+# ---------------------------------------------------------------------------
+
+
+class AgentToolCall(BaseModel):
+    """A single tool invocation made during an agent turn."""
+
+    tool: str
+    input: Dict[str, Any]
+    output: str
+
+
+class AgentChatRequest(BaseModel):
+    message: str = Field(..., description="User message to the AI agent")
+    session_id: str = Field("default", description="Conversation session ID for memory continuity")
+
+
+class AgentChatResponse(BaseModel):
+    response: str
+    tool_calls: List[AgentToolCall]
+    session_id: str
 
 
 # ---------------------------------------------------------------------------

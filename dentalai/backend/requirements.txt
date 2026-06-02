@@ -1,13 +1,42 @@
+# Web framework
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
+
+# Database
 sqlalchemy==2.0.36
+alembic==1.14.0
+
+# Validation
 pydantic[email]==2.10.3
 pydantic-settings==2.6.1
+
+# Auth
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
+
+# Background scheduling
+apscheduler==3.10.4
+
+# AI — LangChain tool layer + OpenAI function-calling
+# Note: langchain-openai is intentionally omitted — it depends on tiktoken
+# which requires Rust to compile on 32-bit Python 3.8 on Windows.
+# We call the OpenAI API directly, which has no such constraint.
+# On Python 3.11 (target), reinstall langchain-openai and swap _get_client()
+# for ChatOpenAI from langchain_openai if you want the full LangChain stack.
+langchain-core==0.2.43
+langchain==0.2.17
+openai>=1.40.0
+
+# Config
+python-dotenv==1.0.1
+
+# Seed data
 faker==33.1.0
-alembic==1.14.0
+
+# HTTP client
 httpx==0.28.1
+
+# Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
