@@ -72,7 +72,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 from langchain_core.tools import tool
-from openai import OpenAI
+from groq import Groq
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.db.session import SessionLocal
@@ -538,20 +538,20 @@ _SYSTEM_PROMPT = (
 # OpenAI client (lazy — instantiated on first use)
 # ---------------------------------------------------------------------------
 
-_openai_client: Optional[OpenAI] = None
+_groq_client: Optional[Groq] = None
 
 
-def _get_client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        api_key = os.getenv("OPENAI_API_KEY")
+def _get_client() -> Groq:
+    global _groq_client
+    if _groq_client is None:
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise EnvironmentError(
-                "OPENAI_API_KEY is not set. Add it to backend/.env and restart."
+                "GROQ_API_KEY is not set. Add it to backend/.env and restart."
             )
-        _openai_client = OpenAI(api_key=api_key)
-        logger.info("[AGENT] OpenAI client initialised (model=gpt-4o-mini)")
-    return _openai_client
+        _groq_client = Groq(api_key=api_key)
+        logger.info("[AGENT] Groq client initialised (model=llama-3.3-70b-versatile)")
+    return _groq_client
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +593,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     for iteration in range(MAX_ITERATIONS):
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
             tool_choice="auto",

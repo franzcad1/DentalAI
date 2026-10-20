@@ -2,7 +2,6 @@
 
 POST /agent/chat  →  { response, tool_calls, session_id }
 
-The endpoint is protected by the same JWT middleware as every other route.
 It delegates entirely to run_agent() in app.agent.agent — this file is
 intentionally thin so the agent logic can be tested independently of FastAPI.
 """

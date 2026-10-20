@@ -27,6 +27,7 @@ apscheduler==3.10.4
 langchain-core==0.2.43
 langchain==0.2.17
 openai>=1.40.0
+groq>=0.11.0
 
 # Config
 python-dotenv==1.0.1
