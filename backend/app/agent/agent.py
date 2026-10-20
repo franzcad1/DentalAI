@@ -550,7 +550,7 @@ def _get_client() -> Groq:
                 "GROQ_API_KEY is not set. Add it to backend/.env and restart."
             )
         _groq_client = Groq(api_key=api_key)
-        logger.info("[AGENT] Groq client initialised (model=llama-3.3-70b-versatile)")
+        logger.info("[AGENT] Groq client initialised (model=llama3-70b-8192)")
     return _groq_client
 
 
@@ -593,7 +593,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     for iteration in range(MAX_ITERATIONS):
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama3-70b-8192",
             messages=messages,
             tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
             tool_choice="auto",
