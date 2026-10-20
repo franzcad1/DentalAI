@@ -6,20 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_auth
 from app.db.session import get_db
 from app.models.orm import PatientRecall
 from app.models.schemas import NexHealthResponse, PaginatedList, PatientRecallRead
 
 router = APIRouter(prefix="/patient_recalls", tags=["recalls"])
 
-Auth = Annotated[dict, Depends(require_auth)]
 DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("", response_model=NexHealthResponse[PaginatedList[PatientRecallRead]])
 def list_patient_recalls(
-    _: Auth,
     db: DB,
     status: Optional[str] = Query(None, description="pending | contacted | scheduled | dismissed"),
     due_before: Optional[date] = Query(None, description="Return recalls with due_date <= this date"),
@@ -43,7 +40,6 @@ class RecallUpdate(BaseModel):
 
 @router.patch("/{recall_id}", response_model=NexHealthResponse[PatientRecallRead])
 def update_recall(
-    _: Auth,
     db: DB,
     recall_id: int,
     body: RecallUpdate,

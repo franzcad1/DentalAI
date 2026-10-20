@@ -5,15 +5,20 @@ would be rotated and loaded from a secrets manager; here a hard-coded
 dev secret keeps the local dev loop frictionless.
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing_extensions import Annotated
 
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
-# Dev-only secret. Override via environment variable in any real deployment.
-SECRET_KEY = "dentalai-dev-secret-change-in-prod"
+load_dotenv()
+
+# Read from environment — falls back to a dev default so local dev works
+# without any setup. Set JWT_SECRET in .env for any real deployment.
+SECRET_KEY = os.getenv("JWT_SECRET", "dentalai-dev-secret-change-in-prod")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 h for convenience during local dev
 

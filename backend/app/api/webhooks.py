@@ -7,23 +7,18 @@ logged to the console exactly like a real event.
 """
 
 import logging
-from typing_extensions import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.auth import require_auth
 from app.events.bus import emit_event
 from app.models.schemas import NexHealthResponse, WebhookSimulateRequest, WebhookSimulateResponse
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
 
-Auth = Annotated[dict, Depends(require_auth)]
-
 
 @router.post("/simulate", response_model=NexHealthResponse[WebhookSimulateResponse])
 def simulate_webhook(
-    _: Auth,
     body: WebhookSimulateRequest,
 ) -> NexHealthResponse[WebhookSimulateResponse]:
     # Route through the same bus as all other events so it's persisted +

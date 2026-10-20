@@ -5,7 +5,6 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.auth import require_auth
 from app.db.session import get_db
 from app.events.bus import emit_event
 from app.models.orm import Appointment
@@ -19,13 +18,11 @@ from app.models.schemas import (
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
-Auth = Annotated[dict, Depends(require_auth)]
 DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("", response_model=NexHealthResponse[PaginatedList[AppointmentRead]])
 def list_appointments(
-    _: Auth,
     db: DB,
     provider_id: Optional[int] = Query(None),
     date: Optional[date] = Query(None, description="Filter appointments on this calendar date"),
@@ -46,7 +43,7 @@ def list_appointments(
 
 
 @router.post("", response_model=NexHealthResponse[AppointmentRead], status_code=status.HTTP_201_CREATED)
-def create_appointment(_: Auth, db: DB, body: AppointmentCreate) -> NexHealthResponse[AppointmentRead]:
+def create_appointment(db: DB, body: AppointmentCreate) -> NexHealthResponse[AppointmentRead]:
     appt = Appointment(**body.model_dump())
     db.add(appt)
     db.commit()
@@ -71,7 +68,7 @@ def create_appointment(_: Auth, db: DB, body: AppointmentCreate) -> NexHealthRes
 
 @router.patch("/{appointment_id}", response_model=NexHealthResponse[AppointmentRead])
 def update_appointment(
-    _: Auth, db: DB, appointment_id: int, body: AppointmentUpdate
+    db: DB, appointment_id: int, body: AppointmentUpdate
 ) -> NexHealthResponse[AppointmentRead]:
     appt = db.get(Appointment, appointment_id)
     if not appt:

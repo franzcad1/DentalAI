@@ -8,21 +8,17 @@ intentionally thin so the agent logic can be tested independently of FastAPI.
 """
 
 import logging
-from typing_extensions import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
-from app.auth import require_auth
 from app.models.schemas import AgentChatRequest, AgentChatResponse, AgentToolCall
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger(__name__)
 
-Auth = Annotated[dict, Depends(require_auth)]
-
 
 @router.post("/chat", response_model=AgentChatResponse)
-def agent_chat(_: Auth, body: AgentChatRequest) -> AgentChatResponse:
+def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
     """Send a message to the DentalAI agent and receive a structured reply.
 
     The agent has access to five tools: check_available_slots, book_appointment,

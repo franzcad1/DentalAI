@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.auth import require_auth
 from app.db.session import get_db
 from app.models.orm import Patient
 from app.models.schemas import (
@@ -17,13 +16,11 @@ from app.models.schemas import (
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
-Auth = Annotated[dict, Depends(require_auth)]
 DB = Annotated[Session, Depends(get_db)]
 
 
 @router.get("", response_model=NexHealthResponse[PaginatedList[PatientRead]])
 def list_patients(
-    _: Auth,
     db: DB,
     name: Optional[str] = Query(None, description="Partial match on first or last name"),
     email: Optional[str] = Query(None),
@@ -42,7 +39,7 @@ def list_patients(
 
 
 @router.get("/{patient_id}", response_model=NexHealthResponse[PatientRead])
-def get_patient(_: Auth, db: DB, patient_id: int) -> NexHealthResponse[PatientRead]:
+def get_patient(db: DB, patient_id: int) -> NexHealthResponse[PatientRead]:
     patient = db.get(Patient, patient_id)
     if not patient:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
@@ -50,7 +47,7 @@ def get_patient(_: Auth, db: DB, patient_id: int) -> NexHealthResponse[PatientRe
 
 
 @router.post("", response_model=NexHealthResponse[PatientRead], status_code=status.HTTP_201_CREATED)
-def create_patient(_: Auth, db: DB, body: PatientCreate) -> NexHealthResponse[PatientRead]:
+def create_patient(db: DB, body: PatientCreate) -> NexHealthResponse[PatientRead]:
     patient = Patient(**body.model_dump())
     db.add(patient)
     db.commit()

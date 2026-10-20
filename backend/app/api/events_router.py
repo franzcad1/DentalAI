@@ -11,13 +11,11 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth import require_auth
 from app.db.session import get_db
 from app.models.orm import Event
 
 router = APIRouter(prefix="/events", tags=["events"])
 
-Auth = Annotated[dict, Depends(require_auth)]
 DB = Annotated[Session, Depends(get_db)]
 
 
@@ -31,7 +29,6 @@ class EventOut:
 
 @router.get("")
 def list_events(
-    _: Auth,
     db: DB,
     event_type: Optional[str] = Query(None, description="Filter by event_type prefix"),
     limit: int = Query(50, ge=1, le=200),

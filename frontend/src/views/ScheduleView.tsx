@@ -265,14 +265,38 @@ function NotesCell({ appt }: { appt: Appointment }) {
   )
 }
 
+// ─── Week strip helpers ───────────────────────────────────────────────────────
+
+function getWeekDays(anchor: string): string[] {
+  // Returns 7 ISO date strings starting from Monday of the week containing anchor
+  const d = new Date(`${anchor}T00:00`)
+  const day = d.getDay() // 0=Sun
+  const monday = new Date(d)
+  monday.setDate(d.getDate() - ((day + 6) % 7))
+  return Array.from({ length: 7 }, (_, i) => {
+    const dd = new Date(monday)
+    dd.setDate(monday.getDate() + i)
+    return dd.toISOString().split('T')[0]
+  })
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function ScheduleView() {
   const today = todayISO()
   const qc = useQueryClient()
   const [showNewAppt, setShowNewAppt] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<string | 'all'>(today)
 
-  const apptQuery   = useQuery({ queryKey: ['appointments', today], queryFn: () => api.getAppointments({ date: today, limit: 200 }) })
+  const weekDays = getWeekDays(today)
+
+  const apptQuery   = useQuery({
+    queryKey: ['appointments', selectedDate],
+    queryFn: () => api.getAppointments({
+      date: selectedDate === 'all' ? undefined : selectedDate,
+      limit: 200,
+    }),
+  })
   const patientQuery = useQuery({ queryKey: ['patients'], queryFn: () => api.getPatients({ limit: 200 }) })
   const providerQuery = useQuery({ queryKey: ['providers'], queryFn: () => api.getProviders() })
   const typeQuery    = useQuery({ queryKey: ['appointment_types'], queryFn: () => api.getAppointmentTypes() })
@@ -295,14 +319,20 @@ export function ScheduleView() {
     (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
   )
 
+  const headingLabel = selectedDate === 'all'
+    ? 'All Appointments'
+    : selectedDate === today
+    ? "Today's Schedule"
+    : new Date(`${selectedDate}T00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <CalendarDays className="h-6 w-6 text-accent" />
           <div>
-            <h1 className="text-xl font-semibold text-slate-100">Today's Schedule</h1>
+            <h1 className="text-xl font-semibold text-slate-100">{headingLabel}</h1>
             <p className="text-sm text-slate-400">
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
             </p>
@@ -320,6 +350,42 @@ export function ScheduleView() {
             <Plus className="h-4 w-4" /> New Appointment
           </Button>
         </div>
+      </div>
+
+      {/* Week day strip */}
+      <div className="mb-6 flex items-center gap-1.5 overflow-x-auto pb-1">
+        <button
+          onClick={() => setSelectedDate('all')}
+          className={`flex-shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+            selectedDate === 'all'
+              ? 'border-accent bg-accent/20 text-accent'
+              : 'border-surface-border text-slate-400 hover:bg-surface-raised hover:text-slate-200'
+          }`}
+        >
+          All
+        </button>
+        {weekDays.map(day => {
+          const d = new Date(`${day}T00:00`)
+          const isToday = day === today
+          const isSelected = selectedDate === day
+          return (
+            <button
+              key={day}
+              onClick={() => setSelectedDate(day)}
+              className={`flex flex-shrink-0 flex-col items-center rounded-lg border px-3 py-2 text-xs transition-colors ${
+                isSelected
+                  ? 'border-accent bg-accent/20 text-accent'
+                  : isToday
+                  ? 'border-accent/40 text-slate-200 hover:bg-surface-raised'
+                  : 'border-surface-border text-slate-400 hover:bg-surface-raised hover:text-slate-200'
+              }`}
+            >
+              <span className="font-medium">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <span className={`text-[11px] ${isToday ? 'font-bold' : ''}`}>{d.getDate()}</span>
+              {isToday && <span className="mt-0.5 h-1 w-1 rounded-full bg-accent" />}
+            </button>
+          )
+        })}
       </div>
 
       {/* Stats strip */}
@@ -355,7 +421,7 @@ export function ScheduleView() {
       {!isLoading && !error && appointments.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-surface-border py-16 text-center">
           <CalendarDays className="mb-3 h-10 w-10 text-slate-600" />
-          <p className="text-slate-400">No appointments today</p>
+          <p className="text-slate-400">No appointments {selectedDate === 'all' ? 'found' : selectedDate === today ? 'today' : 'on this day'}</p>
           <Button size="sm" className="mt-4 gap-1.5" onClick={() => setShowNewAppt(true)}>
             <Plus className="h-3.5 w-3.5" /> Book one now
           </Button>
@@ -380,11 +446,16 @@ export function ScheduleView() {
                 <div className={`h-12 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
 
                 {/* Time */}
-                <div className="w-20 flex-shrink-0">
+                <div className="w-24 flex-shrink-0">
                   <p className="text-sm font-semibold text-slate-200">{formatTime(appt.start_time)}</p>
                   <p className="flex items-center gap-1 text-xs text-slate-500">
                     <Clock className="h-3 w-3" />{formatTime(appt.end_time)}
                   </p>
+                  {selectedDate === 'all' && (
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {new Date(appt.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </p>
+                  )}
                 </div>
 
                 {/* Patient */}
