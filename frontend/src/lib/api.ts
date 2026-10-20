@@ -228,6 +228,10 @@ export const api = {
       '/api/v1/locations'
     ),
 
+  // Sample patient names for suggestions
+  getSamplePatientNames: (n = 4) =>
+    request<string[]>(`/api/v1/patients/sample?n=${n}`),
+
   // Agent
   agentChat: (message: string, sessionId: string) =>
     request<AgentChatResponse>('/api/v1/agent/chat', {

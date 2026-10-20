@@ -139,12 +139,15 @@ function MessageBubble({ msg }: { msg: Message }) {
 
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
-const SUGGESTIONS = [
-  'Search for a patient named Susan and book her a cleaning this week',
-  'Which patients are most overdue for a recall?',
-  'Find patient Jonathan and draft a recall message for him',
-  'Look up Douglas and show his recall status',
-]
+function buildSuggestions(names: string[]): string[] {
+  const [a, b, c, d] = [...names, 'a patient', 'a patient', 'a patient', 'a patient']
+  return [
+    `Search for ${a} and book a cleaning this week`,
+    'Which patients are most overdue for a recall?',
+    `Find ${b} and draft a recall message`,
+    `Look up ${c} and show their recall status`,
+  ]
+}
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
@@ -185,8 +188,16 @@ export function BookingChatView() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId] = useState(loadSession)
+  const [suggestions, setSuggestions] = useState<string[]>(buildSuggestions([]))
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Load dynamic suggestions from the backend
+  useEffect(() => {
+    api.getSamplePatientNames(4).then((names) => {
+      setSuggestions(buildSuggestions(names))
+    }).catch(() => {})
+  }, [])
 
   // Persist messages and scroll to bottom whenever messages change
   useEffect(() => {
@@ -284,7 +295,7 @@ export function BookingChatView() {
                 manage recall queues, and draft outreach messages.
               </p>
               <div className="grid w-full max-w-lg grid-cols-1 gap-2">
-                {SUGGESTIONS.map((s) => (
+                {suggestions.map((s) => (
                   <button
                     key={s}
                     onClick={() => sendMessage(s)}

@@ -1,4 +1,5 @@
-from typing import Optional
+import random
+from typing import List, Optional
 from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -36,6 +37,14 @@ def list_patients(
     total = q.count()
     items = q.offset(skip).limit(limit).all()
     return NexHealthResponse(data=PaginatedList(items=items, total=total))
+
+
+@router.get("/sample", response_model=List[str])
+def sample_patient_names(db: DB, n: int = Query(4, ge=1, le=10)) -> List[str]:
+    """Return n random patient first names for UI suggestions."""
+    patients = db.query(Patient).all()
+    sample = random.sample(patients, min(n, len(patients)))
+    return [p.first_name for p in sample]
 
 
 @router.get("/{patient_id}", response_model=NexHealthResponse[PatientRead])
