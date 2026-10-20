@@ -140,24 +140,57 @@ function MessageBubble({ msg }: { msg: Message }) {
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  'Book a cleaning for patient 3 with any available provider this week',
+  'Book a cleaning for John Smith this week',
   'Which patients are most overdue for a recall?',
-  'Draft a recall message for patient 7',
-  'Show me patient 5\'s context and recall status',
+  'Draft a recall message for Jane Doe',
+  'Look up patient Maria Garcia and show her recall status',
 ]
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+const SESSION_KEY = 'dentalai_chat_session_id'
+const MESSAGES_KEY = 'dentalai_chat_messages'
+
+function loadSession(): string {
+  try {
+    return sessionStorage.getItem(SESSION_KEY) || (() => {
+      const id = `chat-${Date.now()}`
+      sessionStorage.setItem(SESSION_KEY, id)
+      return id
+    })()
+  } catch {
+    return `chat-${Date.now()}`
+  }
+}
+
+function loadMessages(): Message[] {
+  try {
+    const raw = sessionStorage.getItem(MESSAGES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Array<Omit<Message, 'timestamp'> & { timestamp: string }>
+    return parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }))
+  } catch {
+    return []
+  }
+}
+
+function saveMessages(msgs: Message[]) {
+  try {
+    sessionStorage.setItem(MESSAGES_KEY, JSON.stringify(msgs))
+  } catch {}
+}
+
 export function BookingChatView() {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(loadMessages)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId] = useState(() => `chat-${Date.now()}`)
+  const [sessionId] = useState(loadSession)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Scroll to bottom whenever messages change
+  // Persist messages and scroll to bottom whenever messages change
   useEffect(() => {
+    saveMessages(messages)
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 

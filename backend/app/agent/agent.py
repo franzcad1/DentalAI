@@ -388,6 +388,45 @@ def get_recall_queue() -> str:
 
 
 @tool
+def search_patients(name: str) -> str:
+    """Search for patients by first or last name (case-insensitive, partial match).
+
+    Args:
+        name: Full or partial patient name to search for.
+
+    Returns:
+        JSON list of matching patients with id, name, dob, email, and phone.
+        Returns an error message if no matches are found.
+    """
+    db = SessionLocal()
+    try:
+        term = f"%{name.strip()}%"
+        patients = (
+            db.query(Patient)
+            .filter(
+                (Patient.first_name.ilike(term)) | (Patient.last_name.ilike(term))
+            )
+            .limit(10)
+            .all()
+        )
+        if not patients:
+            return f"No patients found matching '{name}'."
+        result = [
+            {
+                "id": p.id,
+                "name": f"{p.first_name} {p.last_name}",
+                "dob": str(p.dob) if p.dob else None,
+                "email": p.email,
+                "phone": p.phone,
+            }
+            for p in patients
+        ]
+        return json.dumps(result, indent=2)
+    finally:
+        db.close()
+
+
+@tool
 def draft_recall_message(patient_id: int) -> str:
     """Draft a personalised recall outreach message for a patient.
 
@@ -479,6 +518,7 @@ def draft_recall_message(patient_id: int) -> str:
 # ---------------------------------------------------------------------------
 
 TOOLS = [
+    search_patients,
     check_available_slots,
     book_appointment,
     get_patient_context,
@@ -524,6 +564,7 @@ OPENAI_TOOL_SCHEMAS = _build_openai_schemas()
 _SYSTEM_PROMPT = (
     "You are DentalAI, an intelligent scheduling and recall assistant for a dental practice.\n\n"
     "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
+    "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
     "- Find open appointment slots for patients\n"
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
     "- Retrieve patient history and recall status\n"
@@ -608,10 +649,23 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
         if choice.finish_reason == "tool_calls":
             # Append the assistant's tool-call message to the conversation
-            # Strip unsupported fields (e.g. 'annotations') for Groq compatibility
+            # Build manually to avoid unsupported fields (annotations, executed_tools, etc.)
             assistant_msg = choice.message
-            assistant_dict = assistant_msg.model_dump()
-            assistant_dict.pop("annotations", None)
+            assistant_dict: Dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_msg.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in (assistant_msg.tool_calls or [])
+                ],
+            }
             messages.append(assistant_dict)  # type: ignore[arg-type]
 
             # Execute every tool call the model requested in this round
