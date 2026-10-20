@@ -3,7 +3,10 @@ from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./dentalai.db"
+import os
+
+_db_path = os.getenv("DATABASE_URL", "sqlite:///./dentalai.db")
+SQLALCHEMY_DATABASE_URL = _db_path
 
 # check_same_thread=False is required for SQLite with FastAPI's threading model
 engine = create_engine(

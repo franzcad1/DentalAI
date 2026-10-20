@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: dentalai-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash docker-entrypoint.sh
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////tmp/dentalai.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
