@@ -227,5 +227,59 @@ def run_seed() -> None:
         db.close()
 
 
+def refresh_slots() -> None:
+    """Delete all future unbooked slots and regenerate a fresh 14-day grid.
+
+    Safe to call on every startup — only touches AvailableSlot rows that
+    are in the future and not yet booked, so existing bookings are untouched.
+    """
+    import random as _rng_mod
+    rng = _rng_mod.Random(42)
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        now = datetime.now(tz=timezone.utc)
+
+        # Remove stale future unbooked slots
+        db.query(AvailableSlot).filter(
+            AvailableSlot.is_booked == False,  # noqa: E712
+            AvailableSlot.start_time >= now,
+        ).delete(synchronize_session=False)
+
+        providers = db.query(Provider).all()
+        locations = db.query(Location).all()
+        if not providers or not locations:
+            db.rollback()
+            return
+
+        for offset in range(14):
+            day = today + timedelta(days=offset)
+            if day.weekday() >= 5:
+                continue
+            for provider in providers:
+                location = rng.choice(locations)
+                slot_start = datetime(day.year, day.month, day.day, 8, 0, tzinfo=timezone.utc)
+                day_end = datetime(day.year, day.month, day.day, 17, 0, tzinfo=timezone.utc)
+                while slot_start < day_end:
+                    slot_end = slot_start + timedelta(minutes=30)
+                    db.add(AvailableSlot(
+                        provider_id=provider.id,
+                        location_id=location.id,
+                        start_time=slot_start,
+                        end_time=slot_end,
+                        is_booked=rng.random() < 0.20,
+                    ))
+                    slot_start = slot_end
+
+        db.commit()
+        print("==> Slots refreshed for next 14 days.")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     run_seed()
