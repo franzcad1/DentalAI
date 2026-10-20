@@ -52,6 +52,18 @@ const config: Config = {
       },
     },
   },
+  safelist: [
+    'hidden',
+    'md:flex',
+    'md:hidden',
+    'pb-16',
+    'md:pb-0',
+    'sm:p-6',
+    'sm:px-6',
+    'sm:grid-cols-4',
+    'sm:block',
+    'sm:inline',
+  ],
   plugins: [],
 }
 
