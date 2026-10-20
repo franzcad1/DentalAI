@@ -625,6 +625,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     """
     client = _get_client()
     history = _get_history(session_id)
+    history_len = len(history)  # snapshot before this turn
 
     # Build the full messages list: system prompt + session history + new turn
     messages: List[ChatCompletionMessageParam] = (
@@ -712,8 +713,11 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     else:
         final_answer = "Agent reached maximum iterations without a final answer."
 
-    # Persist this turn in the session history (without the system prompt)
-    history.append({"role": "user", "content": message})
+    # Persist this full turn: user msg + tool call interleave + final answer.
+    # Saving tool call messages lets the next turn see which slots were returned,
+    # so the model doesn't lose context and ask redundant questions.
+    new_messages = messages[1 + history_len:]  # skip system prompt + old history
+    history.extend(new_messages)
     history.append({"role": "assistant", "content": final_answer})
 
     logger.info(
