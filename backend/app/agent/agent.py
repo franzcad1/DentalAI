@@ -575,7 +575,12 @@ _SYSTEM_PROMPT = (
     "4. For appointment_type_id, use 1 (Cleaning) unless the user specifies otherwise.\n\n"
     "When discussing appointment times, use a human-friendly format like "
     "'Monday, June 3 at 10:00 AM'. If a tool returns an error, explain it clearly "
-    "and suggest alternatives."
+    "and suggest alternatives.\n\n"
+    "Formatting rules:\n"
+    "- NEVER include raw HTML tags like <br> in your responses. Use markdown line breaks or tables.\n"
+    "- When presenting patient info, use a clean markdown table with 'Detail' and 'Information' columns.\n"
+    "- Format dates as 'Month Day, Year' (e.g. 'March 26, 1968'), not ISO format.\n"
+    "- Format appointment times as 'Day, Month Date at HH:MM AM/PM'."
 )
 
 # ---------------------------------------------------------------------------
