@@ -140,10 +140,10 @@ function MessageBubble({ msg }: { msg: Message }) {
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  'Book a cleaning for John Smith this week',
+  'Search for a patient named Susan and book her a cleaning this week',
   'Which patients are most overdue for a recall?',
-  'Draft a recall message for Jane Doe',
-  'Look up patient Maria Garcia and show her recall status',
+  'Find patient Jonathan and draft a recall message for him',
+  'Look up Douglas and show his recall status',
 ]
 
 // ─── Main view ────────────────────────────────────────────────────────────────
