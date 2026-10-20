@@ -12,6 +12,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bell, Copy, Check, RefreshCw, Bot, Phone, CalendarCheck, XCircle } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api, type Patient, type PatientRecall, type RecallStatus } from '@/lib/api'
 import { daysOverdue, formatDateShort, todayISO } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -89,7 +91,13 @@ export function RecallQueueView() {
   }
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(modal.message)
+    const clean = modal.message
+      .replace(/\[urgency=.*?\]$/m, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/^>\s?/gm, '')
+      .trimEnd()
+    await navigator.clipboard.writeText(clean)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -280,9 +288,18 @@ export function RecallQueueView() {
           )}
           {!modal.isLoading && modal.message && (
             <>
-              <pre className="whitespace-pre-wrap rounded-lg border border-surface-border bg-surface-raised p-4 text-sm text-slate-300 font-sans leading-relaxed">
-                {modal.message}
-              </pre>
+              <div className="rounded-lg border border-surface-border bg-surface-raised p-4 text-sm text-slate-300 leading-relaxed">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                    strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+                    blockquote: ({ children }) => <div>{children}</div>,
+                  }}
+                >
+                  {modal.message.replace(/\[urgency=.*?\]$/m, '').trimEnd()}
+                </ReactMarkdown>
+              </div>
               <div className="flex justify-end pt-2">
                 <Button variant="secondary" size="sm" onClick={handleCopy} className="gap-2">
                   {copied ? <><Check className="h-3.5 w-3.5 text-green-400" />Copied</> : <><Copy className="h-3.5 w-3.5" />Copy</>}
