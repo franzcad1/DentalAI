@@ -326,28 +326,28 @@ export function ScheduleView() {
     : new Date(`${selectedDate}T00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <CalendarDays className="h-6 w-6 text-accent" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-100">{headingLabel}</h1>
-            <p className="text-sm text-slate-400">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <CalendarDays className="h-6 w-6 text-accent flex-shrink-0" />
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-slate-100 truncate">{headingLabel}</h1>
+            <p className="text-xs text-slate-400 hidden sm:block">
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => apptQuery.refetch()}
             className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${apptQuery.isFetching ? 'animate-spin' : ''}`} />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </button>
           <Button size="sm" onClick={() => setShowNewAppt(true)} className="gap-1.5">
-            <Plus className="h-4 w-4" /> New Appointment
+            <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New Appointment</span><span className="sm:hidden">New</span>
           </Button>
         </div>
       </div>
@@ -390,7 +390,7 @@ export function ScheduleView() {
 
       {/* Stats strip */}
       {!isLoading && !error && (
-        <div className="mb-6 grid grid-cols-4 gap-3">
+        <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
           {(['confirmed', 'completed', 'no_show', 'cancelled'] as AppointmentStatus[]).map(s => {
             const count = appointments.filter(a => a.status === s).length
             const colors = statusColors(s)
@@ -441,12 +441,12 @@ export function ScheduleView() {
             return (
               <div
                 key={appt.id}
-                className="flex items-center gap-4 rounded-xl border border-surface-border bg-surface-card p-4 hover:bg-surface-raised transition-colors"
+                className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface-card p-3 sm:p-4 hover:bg-surface-raised transition-colors"
               >
-                <div className={`h-12 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
+                <div className={`h-10 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
 
                 {/* Time */}
-                <div className="w-24 flex-shrink-0">
+                <div className="w-20 sm:w-24 flex-shrink-0">
                   <p className="text-sm font-semibold text-slate-200">{formatTime(appt.start_time)}</p>
                   <p className="flex items-center gap-1 text-xs text-slate-500">
                     <Clock className="h-3 w-3" />{formatTime(appt.end_time)}

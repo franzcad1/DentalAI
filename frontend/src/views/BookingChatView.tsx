@@ -290,7 +290,7 @@ export function BookingChatView() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-surface-border px-6 py-4">
+      <div className="flex items-center gap-3 border-b border-surface-border px-4 sm:px-6 py-4">
         <MessageSquare className="h-5 w-5 text-accent" />
         <div>
           <h1 className="text-base font-semibold text-slate-100">Booking Chat</h1>
@@ -303,7 +303,7 @@ export function BookingChatView() {
       </div>
 
       {/* Messages area */}
-      <ScrollArea className="flex-1 px-6">
+      <ScrollArea className="flex-1 px-4 sm:px-6">
         <div className="py-6 space-y-5">
           {/* Welcome state */}
           {messages.length === 0 && (
@@ -339,7 +339,7 @@ export function BookingChatView() {
       </ScrollArea>
 
       {/* Input bar */}
-      <div className="border-t border-surface-border px-6 py-4">
+      <div className="border-t border-surface-border px-4 sm:px-6 py-4">
         <form onSubmit={handleSubmit} className="flex items-center gap-3">
           <Input
             ref={inputRef}
