@@ -144,8 +144,8 @@ def run_seed() -> None:
             for provider in providers:
                 location = rng.choice(locations)
                 # Generate 30-min slots from 8:00 to 16:30 (18 slots/provider/day)
-                slot_start = datetime(day.year, day.month, day.day, 8, 0, tzinfo=timezone.utc)
-                day_end = datetime(day.year, day.month, day.day, 17, 0, tzinfo=timezone.utc)
+                slot_start = datetime(day.year, day.month, day.day, 8, 0)
+                day_end = datetime(day.year, day.month, day.day, 17, 0)
                 while slot_start < day_end:
                     slot_end = slot_start + timedelta(minutes=30)
                     slot = AvailableSlot(
@@ -239,7 +239,7 @@ def refresh_slots() -> None:
     db = SessionLocal()
     try:
         today = date.today()
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.utcnow()  # naive UTC to match how SQLite stores datetimes
 
         # Remove stale future unbooked slots
         db.query(AvailableSlot).filter(
@@ -259,8 +259,8 @@ def refresh_slots() -> None:
                 continue
             for provider in providers:
                 location = rng.choice(locations)
-                slot_start = datetime(day.year, day.month, day.day, 8, 0, tzinfo=timezone.utc)
-                day_end = datetime(day.year, day.month, day.day, 17, 0, tzinfo=timezone.utc)
+                slot_start = datetime(day.year, day.month, day.day, 8, 0)
+                day_end = datetime(day.year, day.month, day.day, 17, 0)
                 while slot_start < day_end:
                     slot_end = slot_start + timedelta(minutes=30)
                     db.add(AvailableSlot(

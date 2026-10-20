@@ -140,17 +140,14 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
 
     db = SessionLocal()
     try:
+        from_dt = datetime(d_from.year, d_from.month, d_from.day)
+        to_dt = datetime(d_to.year, d_to.month, d_to.day) + timedelta(days=1)
+        # Strip timezone from stored datetimes for comparison (SQLite stores as naive)
         q = (
             db.query(AvailableSlot)
             .filter(AvailableSlot.is_booked == False)  # noqa: E712
-            .filter(
-                AvailableSlot.start_time
-                >= datetime(d_from.year, d_from.month, d_from.day)
-            )
-            .filter(
-                AvailableSlot.start_time
-                < datetime(d_to.year, d_to.month, d_to.day) + timedelta(days=1)
-            )
+            .filter(AvailableSlot.start_time >= from_dt)
+            .filter(AvailableSlot.start_time < to_dt)
         )
         if provider_id and provider_id != 0:
             q = q.filter(AvailableSlot.provider_id == provider_id)
