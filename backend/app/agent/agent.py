@@ -593,7 +593,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     for iteration in range(MAX_ITERATIONS):
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=messages,
             tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
             tool_choice="auto",
