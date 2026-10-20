@@ -12,8 +12,9 @@ Lifespan sequence:
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,9 +60,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    extra: List[str] = [
+        o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+    ]
+    origins = ["http://localhost:5173", "http://localhost:3000"] + extra
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://localhost:3000"],
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
