@@ -9,6 +9,8 @@
  * via the session_id state variable.
  */
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { MessageSquare, Send, ChevronDown, ChevronUp, Bot, User, Zap } from 'lucide-react'
 import { api, type AgentToolCall } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -118,7 +120,27 @@ function MessageBubble({ msg }: { msg: Message }) {
           ) : msg.error ? (
             <span className="text-red-400">{msg.error}</span>
           ) : (
-            <p className="whitespace-pre-wrap">{msg.content}</p>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+                table: ({ children }) => (
+                  <div className="overflow-x-auto mt-2 mb-1">
+                    <table className="min-w-full text-xs border-collapse">{children}</table>
+                  </div>
+                ),
+                thead: ({ children }) => <thead className="border-b border-slate-600">{children}</thead>,
+                th: ({ children }) => <th className="px-3 py-1.5 text-left font-semibold text-slate-300 whitespace-nowrap">{children}</th>,
+                td: ({ children }) => <td className="px-3 py-1.5 text-slate-300 border-t border-slate-700/50 whitespace-nowrap">{children}</td>,
+                tr: ({ children }) => <tr className="hover:bg-slate-700/30 transition-colors">{children}</tr>,
+                strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+                ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>,
+                ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>,
+                li: ({ children }) => <li className="text-slate-300">{children}</li>,
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
           )}
         </div>
 
