@@ -162,7 +162,7 @@ function MessageBubble({ msg }: { msg: Message }) {
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
 function buildSuggestions(names: string[]): string[] {
-  const [a, b, c, d] = [...names, 'a patient', 'a patient', 'a patient', 'a patient']
+  const [a, b, c] = [...names, 'a patient', 'a patient', 'a patient']
   return [
     `Search for ${a} and book a cleaning this week`,
     'Which patients are most overdue for a recall?',
