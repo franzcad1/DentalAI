@@ -608,8 +608,11 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
         if choice.finish_reason == "tool_calls":
             # Append the assistant's tool-call message to the conversation
+            # Strip unsupported fields (e.g. 'annotations') for Groq compatibility
             assistant_msg = choice.message
-            messages.append(assistant_msg.model_dump())  # type: ignore[arg-type]
+            assistant_dict = assistant_msg.model_dump()
+            assistant_dict.pop("annotations", None)
+            messages.append(assistant_dict)  # type: ignore[arg-type]
 
             # Execute every tool call the model requested in this round
             for tc in assistant_msg.tool_calls or []:
