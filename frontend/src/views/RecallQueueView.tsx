@@ -176,97 +176,96 @@ export function RecallQueueView() {
       )}
 
       {!isLoading && rows.length > 0 && (
-        <div className="rounded-xl border border-surface-border overflow-hidden">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_150px_110px_130px_auto] gap-4 border-b border-surface-border bg-surface-raised px-5 py-3">
-            {['Patient', 'Recall Type', 'Due Date', 'Overdue', 'Actions'].map(col => (
-              <p key={col} className="text-xs font-medium uppercase tracking-wide text-slate-500">{col}</p>
-            ))}
-          </div>
-
-          <div className="divide-y divide-surface-border">
+        <>
+          {/* ── Mobile cards ───────────────────────────────────────── */}
+          <div className="sm:hidden space-y-2">
             {rows.map(row => {
               const isUpdating = statusMutation.isPending && statusMutation.variables?.id === row.recall.id
+              const name = row.patient
+                ? `${row.patient.first_name} ${row.patient.last_name}`
+                : `Patient #${row.recall.patient_id}`
               return (
-                <div
-                  key={row.recall.id}
-                  className="grid grid-cols-[1fr_150px_110px_130px_auto] items-center gap-4 bg-surface-card px-5 py-3.5 hover:bg-surface-raised transition-colors"
-                >
-                  {/* Patient */}
-                  <div>
-                    <p className="text-sm font-medium text-slate-200">
-                      {row.patient
-                        ? `${row.patient.first_name} ${row.patient.last_name}`
-                        : `Patient #${row.recall.patient_id}`}
-                    </p>
-                    {row.recall.last_contacted_at && (
-                      <p className="text-xs text-slate-500">
-                        Last contacted {formatDateShort(row.recall.last_contacted_at.slice(0, 10))}
-                      </p>
-                    )}
+                <div key={row.recall.id} className="rounded-xl border border-surface-border bg-surface-card p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">{name}</p>
+                      <p className="text-xs text-slate-500 capitalize">{row.recall.recall_type}</p>
+                    </div>
+                    {urgencyLabel(row.daysOver)}
                   </div>
-
-                  {/* Recall type */}
-                  <p className="text-sm text-slate-400 capitalize truncate">{row.recall.recall_type}</p>
-
-                  {/* Due date */}
-                  <p className="text-sm text-slate-400">{formatDateShort(row.recall.due_date)}</p>
-
-                  {/* Overdue */}
-                  {urgencyLabel(row.daysOver)}
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1.5">
+                  <p className="text-xs text-slate-500 mb-3">Due {formatDateShort(row.recall.due_date)}</p>
+                  <div className="flex items-center gap-2">
                     {tab === 'pending' && (
                       <>
-                        <button
-                          disabled={isUpdating}
-                          onClick={() => markStatus(row.recall.id, 'contacted')}
-                          title="Mark as contacted"
-                          className="rounded-md p-1.5 text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
-                        >
-                          <Phone className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          disabled={isUpdating}
-                          onClick={() => markStatus(row.recall.id, 'scheduled')}
-                          title="Mark as scheduled"
-                          className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"
-                        >
-                          <CalendarCheck className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          disabled={isUpdating}
-                          onClick={() => markStatus(row.recall.id, 'dismissed')}
-                          title="Dismiss"
-                          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-500/15 transition-colors disabled:opacity-40"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDraft(row)}
-                          title="Draft AI recall message"
-                          className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"
-                        >
-                          <Bot className="h-3.5 w-3.5" />
-                        </button>
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'contacted')} title="Mark contacted" className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-blue-500/30 py-1.5 text-xs text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-40"><Phone className="h-3.5 w-3.5" />Contacted</button>
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark scheduled" className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-green-500/30 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" />Scheduled</button>
+                        <button onClick={() => handleDraft(row)} title="Draft message" className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-accent/30 py-1.5 text-xs text-accent hover:bg-accent/10 transition-colors"><Bot className="h-3.5 w-3.5" />Draft</button>
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'dismissed')} title="Dismiss" className="rounded-lg border border-surface-border p-1.5 text-slate-500 hover:bg-surface-raised transition-colors disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
                       </>
                     )}
                     {tab === 'contacted' && (
                       <>
-                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark scheduled" className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" /></button>
-                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} title="Move back to pending" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-500/15 transition-colors disabled:opacity-40"><Bell className="h-3.5 w-3.5" /></button>
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-green-500/30 py-1.5 text-xs text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" />Scheduled</button>
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-surface-border py-1.5 text-xs text-slate-400 hover:bg-surface-raised transition-colors disabled:opacity-40"><Bell className="h-3.5 w-3.5" />Pending</button>
                       </>
                     )}
                     {(tab === 'scheduled' || tab === 'dismissed') && (
-                      <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} title="Re-open" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-500/15 transition-colors text-xs disabled:opacity-40">Re-open</button>
+                      <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} className="flex-1 rounded-lg border border-surface-border py-1.5 text-xs text-slate-400 hover:bg-surface-raised transition-colors disabled:opacity-40">Re-open</button>
                     )}
                   </div>
                 </div>
               )
             })}
           </div>
-        </div>
+
+          {/* ── Desktop table ───────────────────────────────────────── */}
+          <div className="hidden sm:block rounded-xl border border-surface-border overflow-hidden">
+            <div className="grid grid-cols-[1fr_150px_110px_130px_auto] gap-4 border-b border-surface-border bg-surface-raised px-5 py-3">
+              {['Patient', 'Recall Type', 'Due Date', 'Overdue', 'Actions'].map(col => (
+                <p key={col} className="text-xs font-medium uppercase tracking-wide text-slate-500">{col}</p>
+              ))}
+            </div>
+            <div className="divide-y divide-surface-border">
+              {rows.map(row => {
+                const isUpdating = statusMutation.isPending && statusMutation.variables?.id === row.recall.id
+                return (
+                  <div key={row.recall.id} className="grid grid-cols-[1fr_150px_110px_130px_auto] items-center gap-4 bg-surface-card px-5 py-3.5 hover:bg-surface-raised transition-colors">
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">
+                        {row.patient ? `${row.patient.first_name} ${row.patient.last_name}` : `Patient #${row.recall.patient_id}`}
+                      </p>
+                      {row.recall.last_contacted_at && (
+                        <p className="text-xs text-slate-500">Last contacted {formatDateShort(row.recall.last_contacted_at.slice(0, 10))}</p>
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-400 capitalize truncate">{row.recall.recall_type}</p>
+                    <p className="text-sm text-slate-400">{formatDateShort(row.recall.due_date)}</p>
+                    {urgencyLabel(row.daysOver)}
+                    <div className="flex items-center gap-1.5">
+                      {tab === 'pending' && (
+                        <>
+                          <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'contacted')} title="Mark as contacted" className="rounded-md p-1.5 text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"><Phone className="h-3.5 w-3.5" /></button>
+                          <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark as scheduled" className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" /></button>
+                          <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'dismissed')} title="Dismiss" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-500/15 transition-colors disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDraft(row)} title="Draft AI recall message" className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"><Bot className="h-3.5 w-3.5" /></button>
+                        </>
+                      )}
+                      {tab === 'contacted' && (
+                        <>
+                          <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark scheduled" className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" /></button>
+                          <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} title="Move back to pending" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-500/15 transition-colors disabled:opacity-40"><Bell className="h-3.5 w-3.5" /></button>
+                        </>
+                      )}
+                      {(tab === 'scheduled' || tab === 'dismissed') && (
+                        <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'pending')} title="Re-open" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-500/15 transition-colors text-xs disabled:opacity-40">Re-open</button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Draft message modal */}
