@@ -6,7 +6,7 @@
  *   Status badge click — cycle status inline (confirmed → completed → no_show → cancelled)
  *   Notes icon click   — edit notes inline
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Clock, RefreshCw, User, Stethoscope,
@@ -60,10 +60,11 @@ interface NewApptFormProps {
   appointmentTypes: { id: number; name: string; duration_minutes: number }[]
   locations: { id: number; name: string }[]
   onCreated: () => void
+  initialDate?: string
 }
 
 function NewAppointmentDialog({
-  open, onClose, patients, providers, appointmentTypes, locations, onCreated,
+  open, onClose, patients, providers, appointmentTypes, locations, onCreated, initialDate,
 }: NewApptFormProps) {
   const today = todayISO()
   const [form, setForm] = useState({
@@ -71,11 +72,16 @@ function NewAppointmentDialog({
     provider_id: '',
     location_id: '',
     appointment_type_id: '',
-    date: today,
+    date: initialDate ?? today,
     time: '09:00',
     notes: '',
   })
   const [error, setError] = useState('')
+
+  // Sync date when dialog opens on a different day
+  useEffect(() => {
+    if (open) setForm(f => ({ ...f, date: initialDate ?? today }))
+  }, [open, initialDate])
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -636,6 +642,7 @@ export function ScheduleView() {
         appointmentTypes={typeQuery.data?.data.items ?? []}
         locations={(locationQuery.data?.data.items ?? []).map(l => ({ id: l.id, name: l.name }))}
         onCreated={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
+        initialDate={selectedDate !== 'all' ? selectedDate : todayISO()}
       />
 
       <EditAppointmentDialog
