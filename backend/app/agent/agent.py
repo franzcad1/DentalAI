@@ -397,15 +397,40 @@ def search_patients(name: str) -> str:
     """
     db = SessionLocal()
     try:
-        term = f"%{name.strip()}%"
-        patients = (
-            db.query(Patient)
-            .filter(
-                (Patient.first_name.ilike(term)) | (Patient.last_name.ilike(term))
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            # Try full-name match first (e.g. "Diana Taylor")
+            first_term = f"%{parts[0]}%"
+            last_term = f"%{parts[-1]}%"
+            patients = (
+                db.query(Patient)
+                .filter(
+                    Patient.first_name.ilike(first_term) & Patient.last_name.ilike(last_term)
+                )
+                .limit(10)
+                .all()
             )
-            .limit(10)
-            .all()
-        )
+            if not patients:
+                # Fall back to either name matching any part
+                term = f"%{name.strip()}%"
+                patients = (
+                    db.query(Patient)
+                    .filter(
+                        Patient.first_name.ilike(first_term) | Patient.last_name.ilike(last_term)
+                    )
+                    .limit(10)
+                    .all()
+                )
+        else:
+            term = f"%{name.strip()}%"
+            patients = (
+                db.query(Patient)
+                .filter(
+                    Patient.first_name.ilike(term) | Patient.last_name.ilike(term)
+                )
+                .limit(10)
+                .all()
+            )
         if not patients:
             return f"No patients found matching '{name}'."
         result = [

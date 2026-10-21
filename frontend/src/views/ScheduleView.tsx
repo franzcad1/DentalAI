@@ -219,6 +219,129 @@ function NewAppointmentDialog({
   )
 }
 
+// ─── Edit Appointment Dialog ──────────────────────────────────────────────────
+
+interface EditApptDialogProps {
+  appt: Appointment | null
+  onClose: () => void
+  providers: Provider[]
+  appointmentTypes: { id: number; name: string; duration_minutes: number }[]
+  onSaved: () => void
+}
+
+function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onSaved }: EditApptDialogProps) {
+  const [form, setForm] = useState({
+    status: appt?.status ?? 'confirmed' as AppointmentStatus,
+    provider_id: String(appt?.provider_id ?? ''),
+    appointment_type_id: String(appt?.appointment_type_id ?? ''),
+    date: appt ? appt.start_time.slice(0, 10) : '',
+    time: appt ? appt.start_time.slice(11, 16) : '',
+    notes: appt?.notes ?? '',
+  })
+  const [error, setError] = useState('')
+
+  // Reset form when appt changes
+  useState(() => {
+    if (appt) setForm({
+      status: appt.status,
+      provider_id: String(appt.provider_id),
+      appointment_type_id: String(appt.appointment_type_id),
+      date: appt.start_time.slice(0, 10),
+      time: appt.start_time.slice(11, 16),
+      notes: appt.notes ?? '',
+    })
+  })
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (!appt) return Promise.reject()
+      const type = appointmentTypes.find(t => t.id === Number(form.appointment_type_id))
+      const startISO = `${form.date}T${form.time}:00`
+      const start = new Date(startISO)
+      const end = new Date(start.getTime() + (type?.duration_minutes ?? 30) * 60_000)
+      return api.updateAppointment(appt.id, {
+        status: form.status,
+        notes: form.notes || undefined,
+        start_time: startISO,
+        end_time: end.toISOString().slice(0, 19),
+      })
+    },
+    onSuccess: () => { onSaved(); onClose(); setError('') },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  function set(key: string, val: string) { setForm(f => ({ ...f, [key]: val })); setError('') }
+
+  const STATUSES: AppointmentStatus[] = ['confirmed', 'completed', 'pending', 'no_show', 'cancelled']
+
+  return (
+    <Dialog open={!!appt} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Appointment</DialogTitle>
+          <DialogDescription>Update details for this appointment.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 mt-1">
+          {/* Status */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Status</label>
+            <select value={form.status} onChange={e => set('status', e.target.value)}
+              className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
+              {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+            </select>
+          </div>
+
+          {/* Provider */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Provider</label>
+            <select value={form.provider_id} onChange={e => set('provider_id', e.target.value)}
+              className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
+              {providers.map(p => <option key={p.id} value={p.id}>Dr. {p.first_name} {p.last_name}</option>)}
+            </select>
+          </div>
+
+          {/* Type */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Appointment Type</label>
+            <select value={form.appointment_type_id} onChange={e => set('appointment_type_id', e.target.value)}
+              className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
+              {appointmentTypes.map(t => <option key={t.id} value={t.id}>{t.name} ({t.duration_minutes} min)</option>)}
+            </select>
+          </div>
+
+          {/* Date + Time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Date</label>
+              <Input type="date" value={form.date} onChange={e => set('date', e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Start time</label>
+              <Input type="time" value={form.time} onChange={e => set('time', e.target.value)} />
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Notes</label>
+            <Input placeholder="Clinical or scheduling notes…" value={form.notes} onChange={e => set('notes', e.target.value)} />
+          </div>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Notes editor ─────────────────────────────────────────────────────────────
 
 function NotesCell({ appt }: { appt: Appointment }) {
@@ -286,6 +409,7 @@ export function ScheduleView() {
   const today = todayISO()
   const qc = useQueryClient()
   const [showNewAppt, setShowNewAppt] = useState(false)
+  const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | 'all'>(today)
 
   const weekDays = getWeekDays(today)
@@ -441,7 +565,8 @@ export function ScheduleView() {
             return (
               <div
                 key={appt.id}
-                className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface-card p-3 sm:p-4 hover:bg-surface-raised transition-colors"
+                onClick={() => setEditAppt(appt)}
+                className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface-card p-3 sm:p-4 hover:bg-surface-raised transition-colors cursor-pointer"
               >
                 <div className={`h-10 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
 
@@ -484,10 +609,10 @@ export function ScheduleView() {
                   <NotesCell appt={appt} />
                 </div>
 
-                {/* Status — click to advance */}
+                {/* Status — click to advance (stop propagation so row click doesn't fire) */}
                 <button
                   disabled={isUpdating}
-                  onClick={() => statusMutation.mutate({ id: appt.id, status: NEXT_STATUS[appt.status] })}
+                  onClick={e => { e.stopPropagation(); statusMutation.mutate({ id: appt.id, status: NEXT_STATUS[appt.status] }) }}
                   title={`Click to mark as ${statusLabel(NEXT_STATUS[appt.status])}`}
                   className="flex-shrink-0 transition-opacity disabled:opacity-50"
                 >
@@ -511,6 +636,14 @@ export function ScheduleView() {
         appointmentTypes={typeQuery.data?.data.items ?? []}
         locations={(locationQuery.data?.data.items ?? []).map(l => ({ id: l.id, name: l.name }))}
         onCreated={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
+      />
+
+      <EditAppointmentDialog
+        appt={editAppt}
+        onClose={() => setEditAppt(null)}
+        providers={providerQuery.data?.data.items ?? []}
+        appointmentTypes={typeQuery.data?.data.items ?? []}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
       />
     </div>
   )
