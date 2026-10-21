@@ -449,6 +449,53 @@ def search_patients(name: str) -> str:
 
 
 @tool
+def get_appointments_for_date(date: str) -> str:
+    """Return all booked appointments for a specific date.
+
+    Args:
+        date: The date to query in YYYY-MM-DD format (e.g. "2026-10-22").
+              Understands relative terms like "today" or "tomorrow" if passed
+              as an ISO date resolved by the caller.
+
+    Returns:
+        JSON list of appointments with patient name, provider name, type,
+        start time, end time, and status.
+    """
+    d = _parse_date(date)
+    db = SessionLocal()
+    try:
+        day_start = datetime(d.year, d.month, d.day)
+        day_end = day_start + timedelta(days=1)
+        appts = (
+            db.query(Appointment)
+            .filter(Appointment.start_time >= day_start)
+            .filter(Appointment.start_time < day_end)
+            .order_by(Appointment.start_time)
+            .all()
+        )
+        if not appts:
+            return f"No appointments scheduled for {d.strftime('%A, %B %d, %Y')}."
+        result = []
+        for a in appts:
+            patient = db.get(Patient, a.patient_id)
+            provider = db.get(Provider, a.provider_id)
+            appt_type = db.get(AppointmentType, a.appointment_type_id)
+            result.append({
+                "appointment_id": a.id,
+                "patient": f"{patient.first_name} {patient.last_name}" if patient else "Unknown",
+                "provider": f"Dr. {provider.first_name} {provider.last_name}" if provider else "Unknown",
+                "type": appt_type.name if appt_type else "Unknown",
+                "start_time": a.start_time.isoformat(),
+                "end_time": a.end_time.isoformat(),
+                "status": a.status,
+                "notes": a.notes or "",
+            })
+        return json.dumps(result, indent=2)
+    finally:
+        db.close()
+
+
+@tool
 def draft_recall_message(patient_id: int) -> str:
     """Draft a personalised recall outreach message for a patient.
 
@@ -541,6 +588,7 @@ def draft_recall_message(patient_id: int) -> str:
 
 TOOLS = [
     search_patients,
+    get_appointments_for_date,
     check_available_slots,
     book_appointment,
     get_patient_context,
@@ -587,11 +635,14 @@ _SYSTEM_PROMPT = (
     "You are DentalAI, an intelligent scheduling and recall assistant for a dental practice.\n\n"
     "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
     "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
+    "- Look up all booked appointments for a day using get_appointments_for_date\n"
     "- Find open appointment slots for patients\n"
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
     "- Retrieve patient history and recall status\n"
     "- Identify overdue patients who need outreach\n"
     "- Draft personalised recall messages\n\n"
+    f"Today's date is {datetime.utcnow().strftime('%Y-%m-%d')}. When the user says 'today', 'tomorrow', "
+    f"'yesterday', or a weekday name, resolve it to a YYYY-MM-DD date before calling tools.\n\n"
     "IMPORTANT — booking flow:\n"
     "1. When you present a numbered list of slots, mentally keep the slot_id for each number.\n"
     "2. When the user picks a slot by number (e.g. '#3' or 'option 2'), DO NOT call check_available_slots again.\n"
