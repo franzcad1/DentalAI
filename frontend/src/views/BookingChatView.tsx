@@ -95,10 +95,10 @@ function MessageBubble({ msg }: { msg: Message }) {
       </div>
 
       {/* Content */}
-      <div className={cn('max-w-[75%]', isUser && 'items-end flex flex-col')}>
+      <div className={cn('min-w-0 max-w-[85%] sm:max-w-[75%]', isUser && 'items-end flex flex-col')}>
         <div
           className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
+            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed min-w-0 overflow-hidden',
             isUser
               ? 'rounded-tr-sm bg-accent text-white'
               : 'rounded-tl-sm bg-surface-card border border-surface-border text-slate-200'
