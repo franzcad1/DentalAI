@@ -449,6 +449,85 @@ def search_patients(name: str) -> str:
 
 
 @tool
+def list_all_patients() -> str:
+    """Return a list of all patients in the practice.
+
+    Returns:
+        JSON list of patients with id, name, dob, email, and phone.
+    """
+    db = SessionLocal()
+    try:
+        patients = db.query(Patient).order_by(Patient.last_name, Patient.first_name).all()
+        if not patients:
+            return "No patients found in the system."
+        result = [
+            {
+                "id": p.id,
+                "name": f"{p.first_name} {p.last_name}",
+                "dob": str(p.dob) if p.dob else None,
+                "email": p.email,
+                "phone": p.phone,
+            }
+            for p in patients
+        ]
+        return json.dumps(result, indent=2)
+    finally:
+        db.close()
+
+
+@tool
+def list_patients_by_provider(provider_name: str) -> str:
+    """Return all patients who have had at least one appointment with a specific provider.
+
+    Args:
+        provider_name: Full or partial provider name (e.g. "Lopez", "Dr. Smith").
+
+    Returns:
+        JSON list of patients with their most recent appointment date with that provider.
+    """
+    db = SessionLocal()
+    try:
+        term = f"%{provider_name.strip().replace('Dr.', '').strip()}%"
+        providers = (
+            db.query(Provider)
+            .filter(
+                Provider.first_name.ilike(term) | Provider.last_name.ilike(term)
+            )
+            .all()
+        )
+        if not providers:
+            return f"No provider found matching '{provider_name}'."
+
+        result = []
+        for provider in providers:
+            appts = (
+                db.query(Appointment)
+                .filter(Appointment.provider_id == provider.id)
+                .order_by(Appointment.start_time.desc())
+                .all()
+            )
+            seen = {}
+            for a in appts:
+                if a.patient_id not in seen:
+                    patient = db.get(Patient, a.patient_id)
+                    if patient:
+                        seen[a.patient_id] = {
+                            "patient_id": patient.id,
+                            "name": f"{patient.first_name} {patient.last_name}",
+                            "last_appointment": a.start_time.strftime("%Y-%m-%d"),
+                            "provider": f"Dr. {provider.first_name} {provider.last_name}",
+                        }
+            result.extend(seen.values())
+
+        if not result:
+            return f"No patients found with appointments for '{provider_name}'."
+        result.sort(key=lambda x: x["name"])
+        return json.dumps(result, indent=2)
+    finally:
+        db.close()
+
+
+@tool
 def get_appointments_for_date(date: str) -> str:
     """Return all booked appointments for a specific date.
 
@@ -588,6 +667,8 @@ def draft_recall_message(patient_id: int) -> str:
 
 TOOLS = [
     search_patients,
+    list_all_patients,
+    list_patients_by_provider,
     get_appointments_for_date,
     check_available_slots,
     book_appointment,
@@ -635,6 +716,8 @@ _SYSTEM_PROMPT = (
     "You are DentalAI, an intelligent scheduling and recall assistant for a dental practice.\n\n"
     "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
     "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
+    "- List all patients in the practice using list_all_patients\n"
+    "- List patients seen by a specific provider using list_patients_by_provider\n"
     "- Look up all booked appointments for a day using get_appointments_for_date\n"
     "- Find open appointment slots for patients\n"
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
