@@ -380,12 +380,7 @@ export function BookingChatView() {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => setShowSuggestions(v => !v)}
-            className={cn(
-              'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors',
-              showSuggestions
-                ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400'
-                : 'border-surface-border text-slate-400 hover:border-yellow-500/40 hover:bg-yellow-500/10 hover:text-yellow-400'
-            )}
+            className="flex items-center gap-1.5 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-500/20 transition-colors"
           >
             <Lightbulb className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Suggestions</span>
