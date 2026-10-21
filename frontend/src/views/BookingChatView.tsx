@@ -383,8 +383,8 @@ export function BookingChatView() {
             className={cn(
               'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors',
               showSuggestions
-                ? 'border-accent/40 bg-accent/10 text-accent'
-                : 'border-surface-border text-slate-400 hover:bg-surface-raised hover:text-slate-200'
+                ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400'
+                : 'border-surface-border text-slate-400 hover:border-yellow-500/40 hover:bg-yellow-500/10 hover:text-yellow-400'
             )}
           >
             <Lightbulb className="h-3.5 w-3.5" />
