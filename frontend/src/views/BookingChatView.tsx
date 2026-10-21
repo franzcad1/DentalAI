@@ -199,11 +199,6 @@ function buildSuggestionGroups(names: string[]): SuggestionGroup[] {
   ]
 }
 
-function buildSuggestions(names: string[]): string[] {
-  const groups = buildSuggestionGroups(names)
-  return groups.flatMap(g => g.prompts.slice(0, 1))
-}
-
 // ─── Suggestions Panel ────────────────────────────────────────────────────────
 
 function SuggestionsPanel({
