@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { MessageSquare, Send, ChevronDown, ChevronUp, Bot, User, Zap, Lightbulb, X } from 'lucide-react'
+import { MessageSquare, Send, ChevronDown, ChevronUp, Bot, User, Zap, Lightbulb, X, Trash2 } from 'lucide-react'
 import { api, type AgentToolCall } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -390,6 +390,19 @@ export function BookingChatView() {
             <Lightbulb className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Suggestions</span>
           </button>
+          {messages.length > 0 && (
+            <button
+              onClick={() => {
+                setMessages([])
+                try { sessionStorage.removeItem(MESSAGES_KEY) } catch {}
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-xs text-slate-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+              title="Clear chat history"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Clear</span>
+            </button>
+          )}
           <div className="flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
             <span className="text-xs text-green-400 hidden sm:inline">Agent ready</span>
