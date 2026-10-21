@@ -253,7 +253,7 @@ def refresh_slots() -> None:
             db.rollback()
             return
 
-        for offset in range(14):
+        for offset in range(28):
             day = today + timedelta(days=offset)
             if day.weekday() >= 5:
                 continue
@@ -273,7 +273,7 @@ def refresh_slots() -> None:
                     slot_start = slot_end
 
         db.commit()
-        print("==> Slots refreshed for next 14 days.")
+        print("==> Slots refreshed for next 28 days.")
     except Exception:
         db.rollback()
         raise
