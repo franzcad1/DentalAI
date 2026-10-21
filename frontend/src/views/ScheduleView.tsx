@@ -247,7 +247,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
   const [error, setError] = useState('')
 
   // Reset form when appt changes
-  useState(() => {
+  useEffect(() => {
     if (appt) setForm({
       status: appt.status,
       provider_id: String(appt.provider_id),
@@ -256,7 +256,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
       time: appt.start_time.slice(11, 16),
       notes: appt.notes ?? '',
     })
-  })
+  }, [appt])
 
   const mutation = useMutation({
     mutationFn: () => {
