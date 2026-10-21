@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { MessageSquare, Send, ChevronDown, ChevronUp, Bot, User, Zap } from 'lucide-react'
+import { MessageSquare, Send, ChevronDown, ChevronUp, Bot, User, Zap, Lightbulb, X } from 'lucide-react'
 import { api, type AgentToolCall } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -161,14 +161,91 @@ function MessageBubble({ msg }: { msg: Message }) {
 
 // ─── Suggested prompts ────────────────────────────────────────────────────────
 
-function buildSuggestions(names: string[]): string[] {
-  const [a, b, c] = [...names, 'a patient', 'a patient', 'a patient']
+interface SuggestionGroup {
+  label: string
+  prompts: string[]
+}
+
+function buildSuggestionGroups(names: string[]): SuggestionGroup[] {
+  const [a, b, c, d] = [...names, 'a patient', 'a patient', 'a patient', 'a patient']
   return [
-    `Search for ${a} and book a cleaning this week`,
-    'Which patients are most overdue for a recall?',
-    `Find ${b} and draft a recall message`,
-    `Look up ${c} and show their recall status`,
+    {
+      label: 'Scheduling',
+      prompts: [
+        `Search for ${a} and book a cleaning this week`,
+        'What are the appointments for tomorrow?',
+        'What are the appointments for today?',
+        'Find available slots for next Monday',
+      ],
+    },
+    {
+      label: 'Patients',
+      prompts: [
+        'List all patients',
+        `Look up ${b} and show their details`,
+        'List patients by Dr. Lopez',
+        'Add a new patient named Jane Doe, DOB 1990-05-12',
+      ],
+    },
+    {
+      label: 'Recalls',
+      prompts: [
+        'Which patients are most overdue for a recall?',
+        `Find ${c} and draft a recall message`,
+        `Look up ${d} and show their recall status`,
+        'Show the full recall queue',
+      ],
+    },
   ]
+}
+
+function buildSuggestions(names: string[]): string[] {
+  const groups = buildSuggestionGroups(names)
+  return groups.flatMap(g => g.prompts.slice(0, 1))
+}
+
+// ─── Suggestions Panel ────────────────────────────────────────────────────────
+
+function SuggestionsPanel({
+  groups,
+  onSelect,
+  onClose,
+}: {
+  groups: SuggestionGroup[]
+  onSelect: (s: string) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="flex flex-col w-64 flex-shrink-0 border-l border-surface-border bg-surface-card">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+        <div className="flex items-center gap-2">
+          <Lightbulb className="h-4 w-4 text-accent" />
+          <span className="text-sm font-medium text-slate-200">Suggestions</span>
+        </div>
+        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {groups.map(group => (
+          <div key={group.label}>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{group.label}</p>
+            <div className="space-y-1">
+              {group.prompts.map(prompt => (
+                <button
+                  key={prompt}
+                  onClick={() => onSelect(prompt)}
+                  className="w-full rounded-lg border border-surface-border bg-surface-base px-3 py-2 text-left text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 hover:border-accent/40 transition-colors leading-relaxed"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
@@ -210,14 +287,18 @@ export function BookingChatView() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId] = useState(loadSession)
-  const [suggestions, setSuggestions] = useState<string[]>(buildSuggestions([]))
+  const [suggestionGroups, setSuggestionGroups] = useState<SuggestionGroup[]>(buildSuggestionGroups([]))
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Keep a flat list for the empty-state quick buttons
+  const suggestions = suggestionGroups.map(g => g.prompts[0])
 
   // Load dynamic suggestions from the backend
   useEffect(() => {
     api.getSamplePatientNames(4).then((names) => {
-      setSuggestions(buildSuggestions(names))
+      setSuggestionGroups(buildSuggestionGroups(names))
     }).catch(() => {})
   }, [])
 
@@ -294,13 +375,31 @@ export function BookingChatView() {
         <MessageSquare className="h-5 w-5 text-accent" />
         <div>
           <h1 className="text-base font-semibold text-slate-100">Booking Chat</h1>
-          <p className="text-xs text-slate-400">AI scheduling and recall agent · gpt-4o-mini</p>
+          <p className="text-xs text-slate-400">AI scheduling and recall agent</p>
         </div>
-        <div className="ml-auto flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-xs text-green-400">Agent ready</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setShowSuggestions(v => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors',
+              showSuggestions
+                ? 'border-accent/40 bg-accent/10 text-accent'
+                : 'border-surface-border text-slate-400 hover:bg-surface-raised hover:text-slate-200'
+            )}
+          >
+            <Lightbulb className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Suggestions</span>
+          </button>
+          <div className="flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-xs text-green-400 hidden sm:inline">Agent ready</span>
+            <span className="text-xs text-green-400 sm:hidden">Ready</span>
+          </div>
         </div>
       </div>
+
+      {/* Body: chat + optional suggestions panel */}
+      <div className="flex flex-1 min-h-0">
 
       {/* Messages area */}
       <ScrollArea className="flex-1 px-4 sm:px-6">
@@ -337,6 +436,17 @@ export function BookingChatView() {
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
+
+      {/* Suggestions panel */}
+      {showSuggestions && (
+        <SuggestionsPanel
+          groups={suggestionGroups}
+          onSelect={(s) => { sendMessage(s); setShowSuggestions(false) }}
+          onClose={() => setShowSuggestions(false)}
+        />
+      )}
+
+      </div>{/* end body flex */}
 
       {/* Input bar */}
       <div className="border-t border-surface-border px-4 sm:px-6 py-4">
