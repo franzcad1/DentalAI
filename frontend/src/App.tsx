@@ -6,6 +6,7 @@ import { ScheduleView } from '@/views/ScheduleView'
 import { RecallQueueView } from '@/views/RecallQueueView'
 import { BookingChatView } from '@/views/BookingChatView'
 import { AgentLogView } from '@/views/AgentLogView'
+import { PatientsView } from '@/views/PatientsView'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/" element={<ScheduleView />} />
           <Route path="/recalls" element={<RecallQueueView />} />
           <Route path="/chat" element={<BookingChatView />} />
+          <Route path="/patients" element={<PatientsView />} />
           <Route path="/log" element={<AgentLogView />} />
         </Route>
       </Routes>

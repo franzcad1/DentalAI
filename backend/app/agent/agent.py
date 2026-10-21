@@ -449,6 +449,51 @@ def search_patients(name: str) -> str:
 
 
 @tool
+def add_patient(
+    first_name: str,
+    last_name: str,
+    dob: str = "",
+    email: str = "",
+    phone: str = "",
+) -> str:
+    """Add a new patient to the practice.
+
+    Args:
+        first_name: Patient's first name.
+        last_name:  Patient's last name.
+        dob:        Date of birth in YYYY-MM-DD format (optional).
+        email:      Email address (optional).
+        phone:      Phone number (optional).
+
+    Returns:
+        Confirmation string with the new patient's ID and name.
+    """
+    db = SessionLocal()
+    try:
+        from app.models.orm import Patient as PatientModel
+        patient = PatientModel(
+            first_name=first_name.strip(),
+            last_name=last_name.strip(),
+            dob=_parse_date(dob) if dob.strip() else None,
+            email=email.strip() or None,
+            phone=phone.strip() or None,
+        )
+        db.add(patient)
+        db.commit()
+        db.refresh(patient)
+        return (
+            f"Patient added successfully!\n"
+            f"  ID    : {patient.id}\n"
+            f"  Name  : {patient.first_name} {patient.last_name}\n"
+            f"  DOB   : {patient.dob or 'not provided'}\n"
+            f"  Email : {patient.email or 'not provided'}\n"
+            f"  Phone : {patient.phone or 'not provided'}"
+        )
+    finally:
+        db.close()
+
+
+@tool
 def list_all_patients() -> str:
     """Return a list of all patients in the practice.
 
@@ -667,6 +712,7 @@ def draft_recall_message(patient_id: int) -> str:
 
 TOOLS = [
     search_patients,
+    add_patient,
     list_all_patients,
     list_patients_by_provider,
     get_appointments_for_date,
@@ -716,6 +762,7 @@ _SYSTEM_PROMPT = (
     "You are DentalAI, an intelligent scheduling and recall assistant for a dental practice.\n\n"
     "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
     "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
+    "- Add a new patient using add_patient\n"
     "- List all patients in the practice using list_all_patients\n"
     "- List patients seen by a specific provider using list_patients_by_provider\n"
     "- Look up all booked appointments for a day using get_appointments_for_date\n"
