@@ -288,7 +288,7 @@ export function BookingChatView() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-surface-border px-4 sm:px-6 py-4">
         <MessageSquare className="h-5 w-5 text-accent" />

@@ -116,9 +116,11 @@ export function RecallQueueView() {
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="flex flex-col h-full">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 bg-surface-base border-b border-surface-border px-4 sm:px-6 pt-4 sm:pt-6 pb-3">
       {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Bell className="h-6 w-6 text-accent" />
           <div>
@@ -136,7 +138,7 @@ export function RecallQueueView() {
       </div>
 
       {/* Status tabs */}
-      <div className="mb-5 flex gap-1 rounded-lg border border-surface-border bg-surface-card p-1 w-fit">
+      <div className="flex gap-1 rounded-lg border border-surface-border bg-surface-card p-1 w-fit">
         {STATUS_TABS.map(t => (
           <button
             key={t.value}
@@ -151,6 +153,10 @@ export function RecallQueueView() {
           </button>
         ))}
       </div>
+      </div>{/* end sticky header */}
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
 
       {isLoading && (
         <div className="space-y-2">
@@ -267,6 +273,8 @@ export function RecallQueueView() {
           </div>
         </>
       )}
+
+      </div>{/* end scrollable content */}
 
       {/* Draft message modal */}
       <Dialog open={modal.open} onOpenChange={open => setModal(p => ({ ...p, open }))}>

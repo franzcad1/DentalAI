@@ -456,9 +456,11 @@ export function ScheduleView() {
     : new Date(`${selectedDate}T00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
-    <div className="p-4 sm:p-6">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between gap-2">
+    <div className="flex flex-col h-full">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 bg-surface-base border-b border-surface-border px-4 sm:px-6 pt-4 sm:pt-6 pb-3">
+      {/* Header row */}
+      <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
           <CalendarDays className="h-6 w-6 text-accent flex-shrink-0" />
           <div className="min-w-0">
@@ -483,7 +485,7 @@ export function ScheduleView() {
       </div>
 
       {/* Week day strip */}
-      <div className="mb-6 flex items-center gap-1.5 overflow-x-auto pb-1">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
         <button
           onClick={() => setSelectedDate('all')}
           className={`flex-shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
@@ -517,6 +519,10 @@ export function ScheduleView() {
           )
         })}
       </div>
+      </div>{/* end sticky header */}
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
 
       {/* Stats strip */}
       {!isLoading && !error && (
@@ -632,6 +638,8 @@ export function ScheduleView() {
           })}
         </div>
       )}
+
+      </div>{/* end scrollable content */}
 
       {/* New appointment dialog */}
       <NewAppointmentDialog
