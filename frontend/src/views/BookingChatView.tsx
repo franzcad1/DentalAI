@@ -347,7 +347,7 @@ export function BookingChatView() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask the agent to book, reschedule, or draft a recall message…"
             disabled={isLoading}
-            className="flex-1 h-11 bg-surface-raised text-sm"
+            className="flex-1 h-11 bg-surface-raised text-base sm:text-sm"
             autoFocus
           />
           <Button type="submit" disabled={!input.trim() || isLoading} size="icon" className="h-11 w-11">
