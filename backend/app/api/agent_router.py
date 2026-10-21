@@ -46,8 +46,13 @@ def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
 
     tool_calls = [AgentToolCall(**tc) for tc in result["tool_calls"]]
 
+    # Strip any raw HTML tags the model may have included
+    import re
+    clean_response = re.sub(r'<br\s*/?>', '\n', result["response"])
+    clean_response = re.sub(r'<[^>]+>', '', clean_response)
+
     return AgentChatResponse(
-        response=result["response"],
+        response=clean_response,
         tool_calls=tool_calls,
         session_id=body.session_id,
     )
