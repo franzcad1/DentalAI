@@ -137,7 +137,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           )}
         >
           {msg.isLoading ? (
-            <LoadingIndicator startedAt={msg.timestamp} />)
+            <LoadingIndicator startedAt={msg.timestamp} />
           ) : msg.error ? (
             <span className="text-red-400">{msg.error}</span>
           ) : (
