@@ -68,40 +68,36 @@ export function AboutView() {
       {/* Why I built it */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">Why I built it</h2>
-        <div className="flex flex-col sm:flex-row gap-5 items-start">
-            <div className="flex flex-col gap-3 sm:w-40 flex-shrink-0">
-            <img
-              src="/franz-portrait.jpg"
-              alt="Franz Cadiente"
-              className="w-full rounded-xl object-cover"
-              style={{ maxHeight: '180px', objectPosition: 'top' }}
-            />
-            <img
-              src="/franz-clinic.jpg"
-              alt="Franz working as a dental assistant"
-              className="w-full rounded-xl object-cover"
-              style={{ maxHeight: '180px', objectPosition: 'top' }}
-            />
-          </div>
-          <div className="flex-1 space-y-3">
-            <p className="text-slate-300 leading-relaxed">
-              I came to Canada from the Philippines as an international student, where I studied software development.
-              After graduating, obtaining permanent residency was the most practical path to building a stable career,
-              and healthcare roles offered a clear route to get there.
-              I worked in a dental office, first as a dental assistant, then as an office administrator, and I took the work seriously.
-              But I never stopped thinking like a developer.
-            </p>
-            <p className="text-slate-300 leading-relaxed">
-              Those years in the clinic gave me something most developers don't have: a real understanding of how dental teams actually work.
-              I watched front desk staff juggle recall queues manually, copy-paste the same outreach messages, and lose time switching between tools
-              to find a single patient's history. These are not edge cases. They are daily friction.
-            </p>
-            <p className="text-slate-300 leading-relaxed">
-              DentalAI is what happens when you combine a software background with that lived experience.
-              The features are not guesses at what a dental office might need. They come from watching real people do real work
-              and thinking about where a well-designed AI layer would actually make a difference.
-            </p>
-          </div>
+        <div className="space-y-4">
+          <p className="text-slate-300 leading-relaxed">
+            I came to Canada from the Philippines as an international student studying software development.
+            After graduating, I had to take a different path. Obtaining permanent residency was the priority,
+            and working in healthcare was one of the clearest routes to get there.
+            So I put my developer career on hold, joined a dental office as a dental assistant, and eventually moved into office administration.
+            I took it seriously and built real skills in that world, but I never stopped thinking like a developer.
+          </p>
+          <img
+            src="/franz-portrait.jpg"
+            alt="Franz Cadiente"
+            className="w-44 rounded-xl object-cover mx-auto block sm:float-right sm:ml-5"
+            style={{ maxHeight: '200px', objectPosition: 'top' }}
+          />
+          <p className="text-slate-300 leading-relaxed">
+            Those years gave me something you can't get from reading docs or watching demos. I was in the clinic every day.
+            I know what it feels like to chase a recall list manually, to copy-paste the same message to twenty patients,
+            to dig through three different screens just to find when someone last came in.
+          </p>
+          <img
+            src="/franz-clinic.jpg"
+            alt="Franz working as a dental assistant"
+            className="w-44 rounded-xl object-cover mx-auto block sm:float-left sm:mr-5"
+            style={{ maxHeight: '200px', objectPosition: 'top' }}
+          />
+          <p className="text-slate-300 leading-relaxed">
+            DentalAI is what happens when you know the business from the inside out and finally have the tools to do something about it.
+            Every feature in this app solves a problem I have personally seen slow a real clinic down.
+          </p>
+          <div className="clear-both" />
         </div>
       </section>
 
