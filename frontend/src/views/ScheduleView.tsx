@@ -7,7 +7,7 @@
  *   Notes icon click   — edit notes inline
  */
 import { useState, useEffect, useRef, useLayoutEffect } from 'react'
-import { startScheduleTour, destroyActiveTour } from '@/hooks/useScheduleTour'
+import { startScheduleTour } from '@/hooks/useScheduleTour'
 import { WELCOME_DISMISSED_KEY } from '@/components/WelcomeModal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -479,6 +479,16 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
 
   const didDragRef = useRef(false)
 
+  // Refs so the blockDrag effect doesn't need to re-register listeners on every data change
+  const blockDragRef = useRef(blockDrag)
+  useEffect(() => { blockDragRef.current = blockDrag }, [blockDrag])
+  const appointmentsRef = useRef(appointments)
+  useEffect(() => { appointmentsRef.current = appointments }, [appointments])
+  const slotHRef = useRef(slotH)
+  useEffect(() => { slotHRef.current = slotH }, [slotH])
+  const providersRef = useRef(providers)
+  useEffect(() => { providersRef.current = providers }, [providers])
+
   const resizeMutation = useMutation({
     mutationFn: ({ id, end_time }: { id: number; end_time: string }) =>
       api.updateAppointment(id, { end_time }),
@@ -490,6 +500,8 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
       api.updateAppointment(id, { start_time, end_time, provider_id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
   })
+  const moveMutationRef = useRef(moveMutation)
+  useEffect(() => { moveMutationRef.current = moveMutation }, [moveMutation])
 
   // Measure available height
   useLayoutEffect(() => {
@@ -540,28 +552,29 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
     }
   }, [drag, slotH])
 
-  // Global mouse handlers for block move drag
+  // Global mouse handlers for block move drag — registered once, use refs for fresh values
   useEffect(() => {
-    if (!blockDrag) return
-
     const onMove = (e: MouseEvent) => {
+      const bd = blockDragRef.current
       const el = bodyRef.current
-      if (!el) return
+      if (!bd || !el) return
       const rect = el.getBoundingClientRect()
       const GUTTER = 56
-      const colWidth = (rect.width - GUTTER) / providers.length
+      const pvs = providersRef.current
+      const colWidth = (rect.width - GUTTER) / pvs.length
       const relX = e.clientX - rect.left - GUTTER
-      const colIdx = Math.max(0, Math.min(providers.length - 1, Math.floor(relX / colWidth)))
-      const newProviderId = providers[colIdx].id
+      const colIdx = Math.max(0, Math.min(pvs.length - 1, Math.floor(relX / colWidth)))
+      const newProviderId = pvs[colIdx].id
 
-      const relY = (e.clientY - rect.top) + el.scrollTop - blockDrag.grabOffsetY
-      const rawSlot = Math.round(relY / slotH)
-      const durationMs = new Date(blockDrag.origEndISO).getTime() - new Date(blockDrag.origStartISO).getTime()
+      const sh = slotHRef.current
+      const relY = (e.clientY - rect.top) + el.scrollTop - bd.grabOffsetY
+      const rawSlot = Math.round(relY / sh)
+      const durationMs = new Date(bd.origEndISO).getTime() - new Date(bd.origStartISO).getTime()
       const durationSlots = Math.round(durationMs / 60_000 / 10)
       const maxStartSlot = SLOTS_TOTAL - durationSlots
       const startSlot = Math.max(0, Math.min(maxStartSlot, rawSlot))
 
-      const origStart = new Date(blockDrag.origStartISO)
+      const origStart = new Date(bd.origStartISO)
       const newStart = new Date(origStart)
       newStart.setHours(GRID_START_H, 0, 0, 0)
       newStart.setTime(newStart.getTime() + startSlot * 10 * 60_000)
@@ -572,16 +585,16 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
 
       const newStartMs = newStart.getTime()
       const newEndMs   = newEnd.getTime()
-      const hasConflict = appointments.some(a =>
-        a.id !== blockDrag.apptId &&
+      const hasConflict = appointmentsRef.current.some(a =>
+        a.id !== bd.apptId &&
         a.provider_id === newProviderId &&
         a.status !== 'cancelled' &&
         new Date(a.start_time).getTime() < newEndMs &&
         new Date(a.end_time).getTime()   > newStartMs
       )
 
-      setBlockDrag(bd => bd ? {
-        ...bd,
+      setBlockDrag(prev => prev ? {
+        ...prev,
         previewProviderId: newProviderId,
         previewStartISO: toISO(newStart),
         previewEndISO: toISO(newEnd),
@@ -591,18 +604,19 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
     }
 
     const onUp = () => {
-      if (!blockDrag || !blockDrag.hasMoved) { setBlockDrag(null); return }
-      if (!blockDrag.isConflict) {
+      const bd = blockDragRef.current
+      if (!bd || !bd.hasMoved) { setBlockDrag(null); return }
+      if (!bd.isConflict) {
         const changed =
-          blockDrag.previewStartISO !== blockDrag.origStartISO ||
-          blockDrag.previewEndISO   !== blockDrag.origEndISO   ||
-          blockDrag.previewProviderId !== blockDrag.origProviderId
+          bd.previewStartISO !== bd.origStartISO ||
+          bd.previewEndISO   !== bd.origEndISO   ||
+          bd.previewProviderId !== bd.origProviderId
         if (changed) {
-          moveMutation.mutate({
-            id: blockDrag.apptId,
-            start_time: blockDrag.previewStartISO,
-            end_time: blockDrag.previewEndISO,
-            provider_id: blockDrag.previewProviderId,
+          moveMutationRef.current.mutate({
+            id: bd.apptId,
+            start_time: bd.previewStartISO,
+            end_time: bd.previewEndISO,
+            provider_id: bd.previewProviderId,
           })
         }
       }
@@ -616,7 +630,8 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [blockDrag, slotH, providers, appointments])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const gridHeight = SLOTS_TOTAL * slotH
 
@@ -755,7 +770,6 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         if (!el) return
                         const rect = el.getBoundingClientRect()
                         const grabOffsetY = (e.clientY - rect.top) + el.scrollTop - top
-                        destroyActiveTour()
                         setBlockDrag({
                           apptId: appt.id,
                           origStartISO: appt.start_time,
@@ -793,7 +807,6 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         onMouseDown={e => {
                           e.stopPropagation()
                           e.preventDefault()
-                          destroyActiveTour()
                           setDrag({
                             apptId: appt.id,
                             startY: e.clientY,
@@ -931,14 +944,16 @@ export function ScheduleView() {
             <RefreshCw className={`h-3.5 w-3.5 ${apptQuery.isFetching ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
-          <button
-            onClick={() => startScheduleTour()}
-            className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
-            title="Take a tour"
-          >
-            <HelpCircle className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Tour</span>
-          </button>
+          <span className="tour-glow-wrap hidden sm:inline-flex">
+            <button
+              onClick={() => startScheduleTour()}
+              className="flex items-center gap-1.5 rounded-lg bg-surface-card px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
+              title="Take a tour"
+            >
+              <HelpCircle className="h-3.5 w-3.5" />
+              <span>Tour</span>
+            </button>
+          </span>
           <Button size="sm" onClick={() => setShowNewAppt(true)} className="gap-1.5" data-tour="new-appt-btn">
             <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New Appointment</span><span className="sm:hidden">New</span>
           </Button>
@@ -1166,9 +1181,9 @@ export function ScheduleView() {
         onSaved={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
       />
 
-      {/* Tour welcome prompt */}
+      {/* Tour welcome prompt — desktop only */}
       {showTourPrompt && (
-        <div className="fixed bottom-6 right-6 z-50 w-72 rounded-2xl border border-surface-border bg-surface-card shadow-2xl p-5 flex flex-col gap-3 animate-fade-in">
+        <div className="hidden sm:flex fixed bottom-6 right-6 z-50 w-72 rounded-2xl border border-surface-border bg-surface-card shadow-2xl p-5 flex-col gap-3 animate-fade-in">
           <div className="flex items-start gap-3">
             <span className="text-2xl leading-none">👋</span>
             <div>
