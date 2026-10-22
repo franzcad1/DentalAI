@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { Layout } from '@/components/Layout'
+import { WelcomeModal } from '@/components/WelcomeModal'
 import { ScheduleView } from '@/views/ScheduleView'
 import { RecallQueueView } from '@/views/RecallQueueView'
 import { BookingChatView } from '@/views/BookingChatView'
@@ -20,6 +21,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <WelcomeModal />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<ScheduleView />} />
