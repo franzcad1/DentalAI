@@ -761,6 +761,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         if (didDragRef.current) { didDragRef.current = false; return }
                         onClickAppt(appt)
                       }}
+                      onDragStart={e => e.preventDefault()}
                       onMouseDown={e => {
                         // Only start move drag on left button, not on resize handle
                         if (e.button !== 0) return
