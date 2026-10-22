@@ -1,14 +1,17 @@
-import { driver, Driver } from 'driver.js'
+import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
 
-let activeDriver: Driver | null = null
+let activeDriver: ReturnType<typeof driver> | null = null
 
-export function destroyActiveTour() {
-  if (activeDriver) { activeDriver.destroy(); activeDriver = null }
+export function destroyTourIfActive() {
+  if (activeDriver) {
+    try { activeDriver.destroy() } catch {}
+    activeDriver = null
+  }
 }
 
 export function startScheduleTour() {
-  destroyActiveTour()
+  destroyTourIfActive()
   const driverObj = driver({
     showProgress: true,
     animate: true,

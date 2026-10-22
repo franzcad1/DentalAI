@@ -7,7 +7,7 @@
  *   Notes icon click   — edit notes inline
  */
 import { useState, useEffect, useRef, useLayoutEffect } from 'react'
-import { startScheduleTour } from '@/hooks/useScheduleTour'
+import { startScheduleTour, destroyTourIfActive } from '@/hooks/useScheduleTour'
 import { WELCOME_DISMISSED_KEY } from '@/components/WelcomeModal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -767,6 +767,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         if (e.button !== 0) return
                         e.stopPropagation()
                         e.preventDefault()
+                        destroyTourIfActive()
                         const el = bodyRef.current
                         if (!el) return
                         const rect = el.getBoundingClientRect()
