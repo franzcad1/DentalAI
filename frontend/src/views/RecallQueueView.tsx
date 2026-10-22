@@ -9,7 +9,7 @@
  *
  * Status filter tabs let you switch between pending / contacted / scheduled / dismissed.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bell, Copy, Check, RefreshCw, Bot, Phone, CalendarCheck, XCircle, HelpCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -57,6 +57,8 @@ export function RecallQueueView() {
   const [sessionId] = useState(() => `recall-${Date.now()}`)
   const [copied, setCopied] = useState(false)
   const [modal, setModal] = useState({ open: false, patientName: '', message: '', isLoading: false, error: '' })
+  const draftStartedAt = useRef<Date | null>(null)
+  const [draftElapsed, setDraftElapsed] = useState(0)
 
   // Fetch recalls for the active tab
   const recallQuery = useQuery({
@@ -91,6 +93,15 @@ export function RecallQueueView() {
     }))
     .sort((a, b) => b.daysOver - a.daysOver)
 
+  useEffect(() => {
+    if (!modal.isLoading) { setDraftElapsed(0); return }
+    draftStartedAt.current = new Date()
+    const id = setInterval(() => {
+      setDraftElapsed(Math.floor((Date.now() - (draftStartedAt.current?.getTime() ?? Date.now())) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [modal.isLoading])
+
   async function handleDraft(row: RecallRow) {
     const name = row.patient
       ? `${row.patient.first_name} ${row.patient.last_name}`
@@ -104,7 +115,20 @@ export function RecallQueueView() {
       )
       setModal(p => ({ ...p, isLoading: false, message: result.response }))
     } catch (err) {
-      setModal(p => ({ ...p, isLoading: false, error: String(err) }))
+      const msg = err instanceof Error ? err.message : String(err)
+      let detail = msg
+      try {
+        const jsonStart = msg.indexOf('{')
+        if (jsonStart !== -1) {
+          const parsed = JSON.parse(msg.slice(jsonStart))
+          if (parsed?.detail) detail = parsed.detail
+        }
+      } catch { /* ignore */ }
+      const errorMsg =
+        msg.includes('503') ? 'Agent unavailable — the backend is not reachable.' :
+        msg.includes('429') || msg.includes('rate limit') || msg.includes('too large') ? detail :
+        msg
+      setModal(p => ({ ...p, isLoading: false, error: errorMsg }))
     }
   }
 
@@ -341,9 +365,21 @@ export function RecallQueueView() {
           </DialogHeader>
 
           {modal.isLoading && (
-            <div className="flex items-center gap-3 py-8 text-slate-400">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-              <span className="text-sm">Drafting…</span>
+            <div className="flex flex-col gap-1.5 py-8">
+              <div className="flex items-center gap-3 text-slate-400">
+                <div className="h-5 w-5 flex-shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                <span className={`text-sm transition-colors ${draftElapsed >= 15 ? 'text-yellow-400' : ''}`}>
+                  {draftElapsed < 5  ? 'Drafting…' :
+                   draftElapsed < 15 ? `Still drafting… (${draftElapsed}s)` :
+                   draftElapsed < 30 ? `This is taking longer than usual… (${draftElapsed}s)` :
+                                       `Waiting on the AI provider… (${draftElapsed}s)`}
+                </span>
+              </div>
+              {draftElapsed >= 20 && (
+                <p className="text-xs text-yellow-300/70 leading-relaxed pl-8">
+                  Groq's free tier may be rate-limited. This could take <span className="font-medium text-yellow-300">over 1 minute</span>.
+                </p>
+              )}
             </div>
           )}
           {modal.error && (
