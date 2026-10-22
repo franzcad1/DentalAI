@@ -2,7 +2,7 @@
 
 A portfolio project demonstrating production-grade AI engineering with Python, FastAPI, LangChain, and React. DentalAI mirrors the structure of the [NexHealth Synchronizer API](https://docs.nexhealth.com) — a real dental practice management platform — without requiring a live account. All data runs locally on SQLite with Faker-generated mock patients, providers, and appointments.
 
-> **Portfolio goal:** Show end-to-end AI product engineering — typed REST API, event-driven background jobs, an LLM agent that books appointments and manages patient recalls, and a polished React dashboard.
+> **Portfolio goal:** Show end-to-end AI product engineering — typed REST API, event-driven background jobs, an LLM agent that books and modifies appointments, and a polished React dashboard with a Dentrix-style interactive calendar (drag-to-move, drag-to-resize, overlap detection).
 
 ---
 
@@ -21,20 +21,20 @@ A portfolio project demonstrating production-grade AI engineering with Python, F
 │  /api/v1/available_slots   /api/v1/patient_recalls              │
 │  /api/v1/providers         /api/v1/events                       │
 │  /api/v1/webhooks/simulate                                      │
-│                  /api/v1/agent/chat ──────────────┐             │
-└──────────────────────────┬──────────────────────  │  ───────────┘
-                           │                        │
-┌──────────────────────────▼──────────┐   ┌─────────▼────────────┐
-│        SQLAlchemy + SQLite          │   │   LangChain Agent     │
-│                                     │   │                       │
-│  Patient  Provider  Location        │   │  check_available_     │
-│  Appointment  AvailableSlot         │   │    slots()            │
-│  PatientRecall  Event               │   │  book_appointment()   │
-│                                     │   │  get_patient_context()│
-└──────────────────────────┬──────────┘   │  get_recall_queue()   │
-                           │              │  draft_recall_        │
-┌──────────────────────────▼──────────┐   │    message()          │
-│        APScheduler (background)     │   └───────────────────────┘
+│  /api/v1/agent/chat        /api/v1/agent/status/{session_id}    │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────┐   ┌────────────────────────┐
+│        SQLAlchemy + SQLite          │   │   LangChain Agent      │
+│                                     │   │   (Groq LLM)           │
+│  Patient  Provider  Location        │   │                        │
+│  Appointment  AvailableSlot         │   │  15 tools — booking,   │
+│  PatientRecall  Event               │   │  scheduling, recalls,  │
+│                                     │   │  patient management    │
+└──────────────────────────┬──────────┘   └────────────────────────┘
+                           │
+┌──────────────────────────▼──────────┐
+│        APScheduler (background)     │
 │                                     │
 │  appointment.reminder  every 2 min  │
 │  recall.due            every 5 min  │
@@ -54,7 +54,7 @@ A portfolio project demonstrating production-grade AI engineering with Python, F
 | **SQLite** | — | Zero-config local persistence; swap for Postgres in prod |
 | **Pydantic v2** | 2.10 | Schema validation + serialisation, NexHealth envelope shaping |
 | **APScheduler** | 3.10 | In-process cron jobs for background event firing |
-| **OpenAI SDK** | 1.40+ | Function-calling API for tool-use agent loop |
+| **Groq SDK** | 0.11+ | LLM inference via OpenAI-compatible API |
 | **LangChain Core** | 0.2 | `@tool` decorator + schema introspection |
 | **python-jose** | 3.3 | HS256 JWT auth |
 | **Faker** | 33 | Deterministic mock patient/appointment data |
@@ -79,9 +79,9 @@ A portfolio project demonstrating production-grade AI engineering with Python, F
 git clone <repo-url>
 cd dentalai
 
-# 2. Set your OpenAI key (optional — all non-agent endpoints work without it)
+# 2. Set your Groq key (optional — all non-agent endpoints work without it)
 cp backend/.env.example backend/.env
-# Edit backend/.env and set OPENAI_API_KEY=sk-...
+# Edit backend/.env and set GROQ_API_KEY=gsk-...
 
 # 3. Start everything
 docker-compose up --build
@@ -101,7 +101,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env               # add OPENAI_API_KEY if you want agent chat
+cp .env.example .env               # add GROQ_API_KEY if you want agent chat
 python -m app.db.seed              # populate the database
 uvicorn app.main:app --reload      # starts on port 8000
 
@@ -284,7 +284,7 @@ Response:
 
 ## LangChain Agent
 
-The agent is built on **OpenAI function calling** (`gpt-4o-mini`) with five tools defined using LangChain's `@tool` decorator. Each tool opens its own database session and returns a string — either JSON data or a human-readable confirmation.
+The agent is built on **Groq function calling** with 15 tools defined using LangChain's `@tool` decorator. Each tool opens its own database session and returns a string — either JSON data or a human-readable confirmation. Rate-limit retries are surfaced in real time to the frontend via a polling status endpoint.
 
 ### Agent Loop
 
@@ -292,7 +292,7 @@ The agent is built on **OpenAI function calling** (`gpt-4o-mini`) with five tool
 User message
     │
     ▼
-POST /chat/completions (with OPENAI_TOOL_SCHEMAS)
+POST /chat/completions  (Groq, with OPENAI_TOOL_SCHEMAS)
     │
     ├─ finish_reason == "tool_calls"
     │   ├─ Execute each called tool against the SQLite DB
@@ -307,11 +307,24 @@ POST /chat/completions (with OPENAI_TOOL_SCHEMAS)
 
 | Tool | Description |
 |---|---|
-| `check_available_slots(date_from, date_to, provider_id?)` | Returns unbooked slots in a date range. Enriched with provider names. |
-| `book_appointment(patient_id, slot_id, appointment_type_id, notes?)` | Creates an Appointment, marks the slot as booked, fires `appointment.booked` event. Validates against double-booking. |
-| `get_patient_context(patient_id)` | Returns demographics + last appointment + current recall status for a patient. |
-| `get_recall_queue()` | Returns all overdue pending recalls sorted by `days_overdue` descending. |
-| `draft_recall_message(patient_id)` | Generates a personalised outreach message with tone escalation: gentle (≤30 days) → moderate (31–90) → urgent (>90 days overdue). |
+| `search_patients` | Search patients by name |
+| `add_patient` | Create a new patient record |
+| `list_all_patients` | List all patients in the practice |
+| `list_patients_by_provider` | List patients seen by a specific provider |
+| `get_patient_appointments` | Get a patient's upcoming/recent appointments |
+| `get_appointments_for_date` | Get all booked appointments for a specific date |
+| `check_available_slots` | Find open slots in a date range, enforcing 5 PM closing |
+| `book_appointment` | Book a slot; validates 5 PM cutoff and provider overlaps |
+| `delete_appointment` | Hard-delete an appointment and free its slot |
+| `cancel_appointment` | Set status to cancelled (keeps the record) |
+| `modify_appointment` | Change any combination of provider, time, type, patient, status, or notes — with overlap and office-hours validation |
+| `get_patient_context` | Demographics + last appointment + recall status |
+| `get_recall_queue` | Overdue recalls sorted by days overdue |
+| `draft_recall_message` | Personalised outreach with tone escalation (gentle → moderate → urgent) |
+
+### Rate Limit Handling
+
+When Groq returns a 429, the backend parses the retry-after time from the error message. Short waits (< 5 min, typically TPM limits) are retried automatically. Long waits (daily token limits) surface immediately as a user-friendly error. The frontend polls `GET /api/v1/agent/status/{session_id}` every second and shows a live countdown under the thinking bubble.
 
 ### Memory
 
