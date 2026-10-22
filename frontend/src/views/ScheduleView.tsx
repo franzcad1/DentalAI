@@ -61,27 +61,35 @@ interface NewApptFormProps {
   locations: { id: number; name: string }[]
   onCreated: () => void
   initialDate?: string
+  initialTime?: string
+  initialProviderId?: number
 }
 
 function NewAppointmentDialog({
-  open, onClose, patients, providers, appointmentTypes, locations, onCreated, initialDate,
+  open, onClose, patients, providers, appointmentTypes, locations, onCreated,
+  initialDate, initialTime, initialProviderId,
 }: NewApptFormProps) {
   const today = todayISO()
   const [form, setForm] = useState({
     patient_id: '',
-    provider_id: '',
+    provider_id: initialProviderId ? String(initialProviderId) : '',
     location_id: '',
     appointment_type_id: '',
     date: initialDate ?? today,
-    time: '09:00',
+    time: initialTime ?? '09:00',
     notes: '',
   })
   const [error, setError] = useState('')
 
-  // Sync date when dialog opens on a different day
+  // Sync prefill when dialog opens
   useEffect(() => {
-    if (open) setForm(f => ({ ...f, date: initialDate ?? today }))
-  }, [open, initialDate])
+    if (open) setForm(f => ({
+      ...f,
+      date: initialDate ?? today,
+      time: initialTime ?? f.time,
+      provider_id: initialProviderId ? String(initialProviderId) : f.provider_id,
+    }))
+  }, [open, initialDate, initialTime, initialProviderId])
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -435,9 +443,10 @@ interface AppointmentGridProps {
   patientMap: Map<number, Patient>
   typeMap: Map<number, string>
   onClickAppt: (a: Appointment) => void
+  onClickSlot: (providerId: number, time: string) => void
 }
 
-function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClickAppt }: AppointmentGridProps) {
+function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClickAppt, onClickSlot }: AppointmentGridProps) {
   const qc = useQueryClient()
   const bodyRef = useRef<HTMLDivElement>(null)
   const [slotH, setSlotH] = useState(14)
@@ -658,8 +667,21 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
           return (
             <div
               key={provider.id}
-              className="flex-1 min-w-[120px] relative border-r border-surface-border last:border-r-0 bg-surface-base"
+              className="flex-1 min-w-[120px] relative border-r border-surface-border last:border-r-0 bg-surface-base cursor-cell"
               style={{ height: gridHeight }}
+              onClick={e => {
+                if (blockDrag?.hasMoved || didDragRef.current) return
+                const el = bodyRef.current
+                if (!el) return
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                const relY = (e.clientY - rect.top) + el.scrollTop
+                const rawSlot = Math.floor(relY / slotH)
+                const slot = Math.max(0, Math.min(SLOTS_TOTAL - 1, rawSlot))
+                const totalMin = GRID_START_H * 60 + slot * 10
+                const hh = String(Math.floor(totalMin / 60)).padStart(2, '0')
+                const mm = String(totalMin % 60).padStart(2, '0')
+                onClickSlot(provider.id, `${hh}:${mm}`)
+              }}
             >
               {/* Horizontal grid lines */}
               {Array.from({ length: SLOTS_TOTAL }, (_, i) => (
@@ -810,6 +832,7 @@ export function ScheduleView() {
   const today = todayISO()
   const qc = useQueryClient()
   const [showNewAppt, setShowNewAppt] = useState(false)
+  const [newApptPrefill, setNewApptPrefill] = useState<{ time?: string; providerId?: number }>({})
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | 'all'>(today)
 
@@ -1069,6 +1092,10 @@ export function ScheduleView() {
               patientMap={patientMap}
               typeMap={typeMap}
               onClickAppt={setEditAppt}
+              onClickSlot={(providerId, time) => {
+                setNewApptPrefill({ providerId, time })
+                setShowNewAppt(true)
+              }}
             />
           )}
         </div>
@@ -1077,13 +1104,15 @@ export function ScheduleView() {
       {/* New appointment dialog */}
       <NewAppointmentDialog
         open={showNewAppt}
-        onClose={() => setShowNewAppt(false)}
+        onClose={() => { setShowNewAppt(false); setNewApptPrefill({}) }}
         patients={patientQuery.data?.data.items ?? []}
         providers={providerQuery.data?.data.items ?? []}
         appointmentTypes={typeQuery.data?.data.items ?? []}
         locations={(locationQuery.data?.data.items ?? []).map(l => ({ id: l.id, name: l.name }))}
         onCreated={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
         initialDate={selectedDate !== 'all' ? selectedDate : todayISO()}
+        initialTime={newApptPrefill.time}
+        initialProviderId={newApptPrefill.providerId}
       />
 
       <EditAppointmentDialog
