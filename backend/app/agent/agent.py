@@ -847,10 +847,23 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     history = _get_history(session_id)
     history_len = len(history)  # snapshot before this turn
 
+    # Keep only the last 10 history messages to stay within the 8k TPM limit.
+    # Also truncate any tool result content that is unusually long.
+    MAX_TOOL_OUTPUT_CHARS = 1500
+    MAX_HISTORY_MSGS = 10
+
+    def _trim_msg(m: Dict[str, Any]) -> Dict[str, Any]:
+        if m.get("role") == "tool" and isinstance(m.get("content"), str):
+            if len(m["content"]) > MAX_TOOL_OUTPUT_CHARS:
+                return {**m, "content": m["content"][:MAX_TOOL_OUTPUT_CHARS] + "\n…(truncated)"}
+        return m
+
+    trimmed_history = [_trim_msg(m) for m in history[-MAX_HISTORY_MSGS:]]
+
     # Build the full messages list: system prompt + session history + new turn
     messages: List[ChatCompletionMessageParam] = (
         [{"role": "system", "content": _SYSTEM_PROMPT}]
-        + history  # type: ignore[arg-type]
+        + trimmed_history  # type: ignore[arg-type]
         + [{"role": "user", "content": message}]
     )
 
