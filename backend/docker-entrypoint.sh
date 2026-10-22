@@ -37,5 +37,8 @@ python -c "from app.db.seed import refresh_slots; refresh_slots()"
 echo "==> Clamping any appointments that exceed 5:00 PM..."
 python -c "from app.db.seed import fix_late_appointments; fix_late_appointments()"
 
+echo "==> Removing any overlapping appointments..."
+python -c "from app.db.seed import fix_overlapping_appointments; fix_overlapping_appointments()"
+
 echo "==> Starting uvicorn..."
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000

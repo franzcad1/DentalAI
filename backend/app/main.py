@@ -40,6 +40,9 @@ STARTUP_ID = str(uuid.uuid4())
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ──────────────────────────────────────────────────────────
     Base.metadata.create_all(bind=engine)
+    from app.db.seed import fix_late_appointments, fix_overlapping_appointments
+    fix_late_appointments()
+    fix_overlapping_appointments()
     start_scheduler()
     token = create_access_token()
     logger.info("=" * 60)

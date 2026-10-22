@@ -41,12 +41,31 @@ APPOINTMENT_TYPE_DEFS = [
 
 def _random_business_time(base_date: date, duration_minutes: int = 30) -> datetime:
     """Return a random start time that guarantees the appointment finishes by 17:00."""
-    latest_start_minutes = 17 * 60 - duration_minutes  # e.g. 16:30 for a 30-min appt
+    latest_start_minutes = 17 * 60 - duration_minutes
     start_minutes = rng.randint(8 * 60, latest_start_minutes)
-    # Round down to nearest 15-min boundary
     start_minutes = (start_minutes // 15) * 15
     hour, minute = divmod(start_minutes, 60)
     return datetime(base_date.year, base_date.month, base_date.day, hour, minute, tzinfo=timezone.utc)
+
+
+def _find_free_slot(
+    base_date: date,
+    duration_minutes: int,
+    provider_id: int,
+    booked: dict,  # { (provider_id, date) -> list of (start_min, end_min) }
+    max_tries: int = 20,
+) -> datetime | None:
+    """Return a non-overlapping start time for the given provider/day, or None."""
+    latest_start = 17 * 60 - duration_minutes
+    slots = booked.setdefault((provider_id, base_date), [])
+    for _ in range(max_tries):
+        start_min = (rng.randint(8 * 60, latest_start) // 15) * 15
+        end_min = start_min + duration_minutes
+        if not any(s < end_min and e > start_min for s, e in slots):
+            slots.append((start_min, end_min))
+            hour, minute = divmod(start_min, 60)
+            return datetime(base_date.year, base_date.month, base_date.day, hour, minute, tzinfo=timezone.utc)
+    return None  # couldn't fit — skip this appointment
 
 
 def run_seed() -> None:
@@ -115,20 +134,23 @@ def run_seed() -> None:
         # Appointment history — 60 days back (mix of statuses)
         # ------------------------------------------------------------------
         today = date.today()
+        booked: dict = {}  # overlap tracking: (provider_id, date) -> [(start_min, end_min)]
         for offset in range(60):
             day = today - timedelta(days=offset + 1)
-            # 2–4 appointments per day
             for _ in range(rng.randint(2, 4)):
                 appt_type = rng.choice(appt_types)
-                start = _random_business_time(day, appt_type.duration_minutes)
+                provider = rng.choice(providers)
+                start = _find_free_slot(day, appt_type.duration_minutes, provider.id, booked)
+                if start is None:
+                    continue  # day is full for this provider
                 end = start + timedelta(minutes=appt_type.duration_minutes)
                 status = rng.choices(
                     APPOINTMENT_STATUSES_HISTORY,
-                    weights=[0.70, 0.20, 0.10],  # mostly completed
+                    weights=[0.70, 0.20, 0.10],
                 )[0]
                 appt = Appointment(
                     patient_id=rng.choice(patients).id,
-                    provider_id=rng.choice(providers).id,
+                    provider_id=provider.id,
                     location_id=rng.choice(locations).id,
                     appointment_type_id=appt_type.id,
                     start_time=start,
@@ -193,16 +215,18 @@ def run_seed() -> None:
         today_appts = 0
         for _ in range(rng.randint(5, 7)):
             appt_type = rng.choice(appt_types)
-            start = _random_business_time(today, appt_type.duration_minutes)
+            provider = rng.choice(providers)
+            start = _find_free_slot(today, appt_type.duration_minutes, provider.id, booked)
+            if start is None:
+                continue
             end = start + timedelta(minutes=appt_type.duration_minutes)
-            # Mix of confirmed/completed/no_show for a realistic day
             status = rng.choices(
                 ["confirmed", "completed", "no_show"],
                 weights=[0.55, 0.35, 0.10],
             )[0]
             appt = Appointment(
                 patient_id=rng.choice(patients).id,
-                provider_id=rng.choice(providers).id,
+                provider_id=provider.id,
                 location_id=rng.choice(locations).id,
                 appointment_type_id=appt_type.id,
                 start_time=start,
@@ -277,6 +301,41 @@ def refresh_slots() -> None:
 
         db.commit()
         print("==> Slots refreshed for next 28 days.")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def fix_overlapping_appointments() -> None:
+    """Remove appointments that overlap with an earlier appointment for the same provider.
+
+    Keeps the appointment with the lower ID (created first) and deletes later ones
+    that conflict. Safe to run on every startup — no-op when no overlaps exist.
+    """
+    db = SessionLocal()
+    try:
+        appts = (
+            db.query(Appointment)
+            .filter(Appointment.status.notin_(["cancelled"]))
+            .order_by(Appointment.provider_id, Appointment.start_time, Appointment.id)
+            .all()
+        )
+        to_delete: list[int] = []
+        # Track the latest end time seen per provider per day
+        latest_end: dict[tuple, datetime] = {}  # (provider_id, date) -> latest end_time
+        for appt in appts:
+            key = (appt.provider_id, appt.start_time.date())
+            end = latest_end.get(key)
+            if end is not None and appt.start_time < end:
+                to_delete.append(appt.id)
+            else:
+                latest_end[key] = max(latest_end.get(key) or appt.end_time, appt.end_time)
+        if to_delete:
+            db.query(Appointment).filter(Appointment.id.in_(to_delete)).delete(synchronize_session=False)
+            db.commit()
+            print(f"[fix_overlapping_appointments] Removed {len(to_delete)} overlapping appointment(s).")
     except Exception:
         db.rollback()
         raise
