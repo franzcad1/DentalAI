@@ -620,6 +620,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
           })
         }
       }
+      destroyTourIfActive()
       didDragRef.current = true
       setBlockDrag(null)
     }
@@ -767,7 +768,6 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         if (e.button !== 0) return
                         e.stopPropagation()
                         e.preventDefault()
-                        destroyTourIfActive()
                         const el = bodyRef.current
                         if (!el) return
                         const rect = el.getBoundingClientRect()
