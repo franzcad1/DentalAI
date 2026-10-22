@@ -41,7 +41,16 @@ export function startRecallTour() {
         element: '[data-tour="recall-actions"]',
         popover: {
           title: '⚡ Quick actions',
-          description: 'Mark a patient as contacted, scheduled, or dismissed — or use the AI button to draft a personalised outreach message.',
+          description: 'Mark a patient as contacted, scheduled, or dismissed to move them through the workflow.',
+          side: 'left',
+          align: 'center',
+        },
+      },
+      {
+        element: '[data-tour="recall-ai-btn"]',
+        popover: {
+          title: '🤖 AI outreach draft',
+          description: 'Click this button to have the AI write a personalised recall message for the patient — ready to copy and send.',
           side: 'left',
           align: 'center',
         },

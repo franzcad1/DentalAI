@@ -283,7 +283,7 @@ export function RecallQueueView() {
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'contacted')} title="Mark as contacted" className="rounded-md p-1.5 text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"><Phone className="h-3.5 w-3.5" /></button>
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark as scheduled" className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" /></button>
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'dismissed')} title="Dismiss" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-500/15 transition-colors disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDraft(row)} title="Draft AI recall message" className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"><Bot className="h-3.5 w-3.5" /></button>
+                          <button {...(rowIdx === 0 ? { 'data-tour': 'recall-ai-btn' } : {})} onClick={() => handleDraft(row)} title="Draft AI recall message" className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"><Bot className="h-3.5 w-3.5" /></button>
                         </>
                       )}
                       {tab === 'contacted' && (
