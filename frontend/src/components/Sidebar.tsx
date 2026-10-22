@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { CalendarDays, Bell, MessageSquare, Activity, Stethoscope, Users } from 'lucide-react'
+import { CalendarDays, Bell, MessageSquare, Activity, Stethoscope, Users, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/patients', icon: Users, label: 'Patients', description: 'Patient directory' },
   { to: '/chat', icon: MessageSquare, label: 'Chat', description: 'AI agent' },
   { to: '/log', icon: Activity, label: 'Log', description: 'Live event feed' },
+  { to: '/about', icon: Info, label: 'About', description: 'Project overview' },
 ]
 
 export function Sidebar() {

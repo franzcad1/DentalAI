@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Stethoscope, Calendar, Bell, MessageSquare, Users, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 
@@ -8,6 +9,7 @@ export const WELCOME_DISMISSED_KEY = 'dentalai_welcome_dismissed'
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     // Show the modal whenever the backend has restarted (new startup_id)
@@ -101,9 +103,14 @@ export function WelcomeModal() {
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">
           <p className="text-xs text-slate-600">Built by Franz · Portfolio 2026</p>
-          <Button size="sm" onClick={dismiss} className="gap-2">
-            Get Started
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => { dismiss(); navigate('/about') }}>
+              Learn More
+            </Button>
+            <Button size="sm" onClick={dismiss} className="gap-2">
+              Get Started
+            </Button>
+          </div>
         </div>
       </div>
     </div>
