@@ -361,10 +361,13 @@ export function BookingChatView() {
         )
       )
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
       const errorMsg =
-        err instanceof Error && err.message.includes('503')
-          ? 'Agent unavailable — set OPENAI_API_KEY in backend/.env and restart.'
-          : String(err)
+        msg.includes('503')
+          ? 'Agent unavailable — the backend is not reachable.'
+          : msg.includes('429') || msg.includes('rate limit') || msg.includes('too large')
+          ? 'The AI provider hit a rate limit. Please wait a moment and try again.'
+          : msg
 
       setMessages((prev) =>
         prev.map((m) =>

@@ -38,7 +38,19 @@ def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
             detail=str(exc),
         )
     except Exception as exc:
+        err_str = str(exc)
         logger.error("[AGENT] Unexpected error during chat: %s", exc, exc_info=True)
+        # Surface Groq rate-limit errors with a friendly message
+        if "413" in err_str or "rate_limit_exceeded" in err_str or "too large" in err_str.lower():
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The AI provider's rate limit was hit (request too large or too many requests). Please try again in a minute.",
+            )
+        if "429" in err_str:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The AI provider is rate-limited right now. Please wait a moment and try again.",
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Agent encountered an unexpected error. Check server logs.",
