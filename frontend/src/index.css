@@ -2,7 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tour button — yellow outline traces clockwise every 3.5s */
+@keyframes tour-trace {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@layer components {
+  .tour-glow-wrap {
+    display: inline-flex;
+    border-radius: 8px;
+    padding: 1px;
+    position: relative;
+    overflow: hidden;
+  }
+  .tour-glow-wrap::before {
+    content: '';
+    position: absolute;
+    inset: -100%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(234,179,8,0.95) 40deg,
+      rgba(234,179,8,0.2) 80deg,
+      transparent 110deg
+    );
+    animation: tour-trace 3.5s linear infinite;
+  }
+  .tour-glow-wrap > button {
+    position: relative;
+    z-index: 1;
+    border-color: transparent !important;
+  }
+}
+
 /* driver.js tour — dark theme overrides */
+.driver-overlay { pointer-events: none !important; }
 .dentalai-tour-popover.driver-popover {
   background: #1e293b;
   border: 1px solid #334155;
