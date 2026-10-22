@@ -20,6 +20,7 @@ def list_patient_recalls(
     db: DB,
     status: Optional[str] = Query(None, description="pending | contacted | scheduled | dismissed"),
     due_before: Optional[date] = Query(None, description="Return recalls with due_date <= this date"),
+    patient_id: Optional[int] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ) -> NexHealthResponse[PaginatedList[PatientRecallRead]]:
@@ -28,6 +29,8 @@ def list_patient_recalls(
         q = q.filter(PatientRecall.status == status)
     if due_before is not None:
         q = q.filter(PatientRecall.due_date <= due_before)
+    if patient_id is not None:
+        q = q.filter(PatientRecall.patient_id == patient_id)
     total = q.count()
     items = q.order_by(PatientRecall.due_date).offset(skip).limit(limit).all()
     return NexHealthResponse(data=PaginatedList(items=items, total=total))

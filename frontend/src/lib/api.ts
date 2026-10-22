@@ -137,10 +137,11 @@ export const api = {
   },
 
   // Appointments
-  getAppointments: (params?: { date?: string; provider_id?: number; limit?: number }) => {
+  getAppointments: (params?: { date?: string; provider_id?: number; patient_id?: number; limit?: number }) => {
     const qs = new URLSearchParams()
     if (params?.date) qs.set('date', params.date)
     if (params?.provider_id) qs.set('provider_id', String(params.provider_id))
+    if (params?.patient_id) qs.set('patient_id', String(params.patient_id))
     qs.set('limit', String(params?.limit ?? 200))
     return request<NexHealthResponse<PaginatedList<Appointment>>>(
       `/api/v1/appointments?${qs.toString()}`
@@ -161,11 +162,13 @@ export const api = {
   getRecalls: (params?: {
     status?: RecallStatus
     due_before?: string
+    patient_id?: number
     limit?: number
   }) => {
     const qs = new URLSearchParams()
     if (params?.status) qs.set('status', params.status)
     if (params?.due_before) qs.set('due_before', params.due_before)
+    if (params?.patient_id) qs.set('patient_id', String(params.patient_id))
     qs.set('limit', String(params?.limit ?? 200))
     return request<NexHealthResponse<PaginatedList<PatientRecall>>>(
       `/api/v1/patient_recalls?${qs.toString()}`

@@ -244,7 +244,6 @@ function buildSuggestionGroups(names: string[]): SuggestionGroup[] {
     {
       label: 'Patients',
       prompts: [
-        'List all patients',
         `Look up ${b} and show their details`,
         'List patients by Dr. Lopez',
         'Add a new patient named Jane Doe, DOB 1990-05-12',

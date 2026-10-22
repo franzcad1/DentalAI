@@ -25,6 +25,7 @@ DB = Annotated[Session, Depends(get_db)]
 def list_appointments(
     db: DB,
     provider_id: Optional[int] = Query(None),
+    patient_id: Optional[int] = Query(None),
     date: Optional[date] = Query(None, description="Filter appointments on this calendar date"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -32,6 +33,8 @@ def list_appointments(
     q = db.query(Appointment)
     if provider_id is not None:
         q = q.filter(Appointment.provider_id == provider_id)
+    if patient_id is not None:
+        q = q.filter(Appointment.patient_id == patient_id)
     if date is not None:
         # SQLite stores datetimes as "YYYY-MM-DD HH:MM:SS" (space, not T)
         q = q.filter(Appointment.start_time >= f"{date} 00:00:00").filter(
