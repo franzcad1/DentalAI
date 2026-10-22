@@ -498,7 +498,31 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
   const moveMutation = useMutation({
     mutationFn: ({ id, start_time, end_time, provider_id }: { id: number; start_time: string; end_time: string; provider_id: number }) =>
       api.updateAppointment(id, { start_time, end_time, provider_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
+    onMutate: async ({ id, start_time, end_time, provider_id }) => {
+      // Cancel any in-flight refetches so they don't overwrite our optimistic update
+      await qc.cancelQueries({ queryKey: ['appointments'] })
+      // Snapshot every matching cache entry so we can roll back on error
+      const snapshots = qc.getQueriesData<{ data: { items: Appointment[] } }>({ queryKey: ['appointments'] })
+      // Apply the optimistic update to all cached appointment lists
+      qc.setQueriesData<{ data: { items: Appointment[] } }>({ queryKey: ['appointments'] }, old => {
+        if (!old) return old
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            items: old.data.items.map(a =>
+              a.id === id ? { ...a, start_time, end_time, provider_id } : a
+            ),
+          },
+        }
+      })
+      return { snapshots }
+    },
+    onError: (_err, _vars, ctx) => {
+      // Roll back all caches to their pre-mutation snapshots
+      ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data))
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
   })
   const moveMutationRef = useRef(moveMutation)
   useEffect(() => { moveMutationRef.current = moveMutation }, [moveMutation])
