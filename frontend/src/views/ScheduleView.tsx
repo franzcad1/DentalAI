@@ -7,10 +7,11 @@
  *   Notes icon click   — edit notes inline
  */
 import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { startScheduleTour } from '@/hooks/useScheduleTour'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Clock, RefreshCw, User, Stethoscope,
-  Plus, FileText, Check, X,
+  Plus, FileText, Check, X, HelpCircle,
 } from 'lucide-react'
 import {
   api,
@@ -636,7 +637,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
   }
 
   return (
-    <div className={`flex flex-col rounded-xl border border-surface-border overflow-hidden flex-1 min-h-0 ${(drag || blockDrag) ? 'select-none' : ''}`}>
+    <div data-tour="grid" className={`flex flex-col rounded-xl border border-surface-border overflow-hidden flex-1 min-h-0 ${(drag || blockDrag) ? 'select-none' : ''}`}>
       {/* Provider header row */}
       <div className="flex border-b border-surface-border bg-surface-card flex-shrink-0">
         <div className="w-14 flex-shrink-0 border-r border-surface-border" />
@@ -664,9 +665,11 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
         {/* One column per provider */}
         {providers.map(provider => {
           const provAppts = appointments.filter(a => a.provider_id === provider.id)
+          const isFirstCol = provider.id === providers[0]?.id
           return (
             <div
               key={provider.id}
+              {...(isFirstCol ? { 'data-tour': 'grid-column' } : {})}
               className="flex-1 min-w-[120px] relative border-r border-surface-border last:border-r-0 bg-surface-base cursor-cell"
               style={{ height: gridHeight }}
               onClick={e => {
@@ -717,9 +720,10 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
               })()}
 
               {/* Appointment blocks */}
-              {provAppts.map(appt => {
+              {provAppts.map((appt, apptIdx) => {
                 const isResizing = drag?.apptId === appt.id
                 const isMoving = blockDrag?.apptId === appt.id
+                const isFirstAppt = isFirstCol && apptIdx === 0
 
                 const top    = slotTop(appt.start_time, slotH)
                 const baseH  = slotHeight(appt.start_time, appt.end_time, slotH)
@@ -735,6 +739,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
 
                     {/* Original block */}
                     <div
+                      {...(isFirstAppt ? { 'data-tour': 'appt-block' } : {})}
                       onClick={e => {
                         e.stopPropagation()
                         if (didDragRef.current) { didDragRef.current = false; return }
@@ -795,6 +800,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                             deltaSlots: 0,
                           })
                         }}
+                        {...(isFirstAppt ? { 'data-tour': 'resize-handle' } : {})}
                         className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5 opacity-0 hover:opacity-100 transition-opacity"
                       >
                         <div className="w-6 h-1 rounded-full bg-current opacity-50" />
@@ -834,6 +840,7 @@ export function ScheduleView() {
   const [showNewAppt, setShowNewAppt] = useState(false)
   const [newApptPrefill, setNewApptPrefill] = useState<{ time?: string; providerId?: number }>({})
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
+
   const [selectedDate, setSelectedDate] = useState<string | 'all'>(today)
 
   const weekDays = getWeekDays(today)
@@ -858,6 +865,17 @@ export function ScheduleView() {
 
   const isLoading = apptQuery.isLoading || patientQuery.isLoading || providerQuery.isLoading
   const error = apptQuery.error || patientQuery.error || providerQuery.error
+
+  const TOUR_KEY = 'dentalai_schedule_tour_done'
+  const gridReady = !!(providerQuery.data?.data.items.length && apptQuery.data)
+  const [showTourPrompt, setShowTourPrompt] = useState(false)
+
+  useEffect(() => {
+    if (!gridReady) return
+    try { if (localStorage.getItem(TOUR_KEY)) return } catch {}
+    const t = setTimeout(() => setShowTourPrompt(true), 400)
+    return () => clearTimeout(t)
+  }, [gridReady])
 
   const patientMap  = new Map((patientQuery.data?.data.items ?? []).map(p => [p.id, p]))
   const providerMap = new Map((providerQuery.data?.data.items ?? []).map(p => [p.id, p]))
@@ -896,7 +914,15 @@ export function ScheduleView() {
             <RefreshCw className={`h-3.5 w-3.5 ${apptQuery.isFetching ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
-          <Button size="sm" onClick={() => setShowNewAppt(true)} className="gap-1.5">
+          <button
+            onClick={() => startScheduleTour()}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
+            title="Take a tour"
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Tour</span>
+          </button>
+          <Button size="sm" onClick={() => setShowNewAppt(true)} className="gap-1.5" data-tour="new-appt-btn">
             <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New Appointment</span><span className="sm:hidden">New</span>
           </Button>
         </div>
@@ -1122,6 +1148,40 @@ export function ScheduleView() {
         appointmentTypes={typeQuery.data?.data.items ?? []}
         onSaved={() => qc.invalidateQueries({ queryKey: ['appointments'] })}
       />
+
+      {/* Tour welcome prompt */}
+      {showTourPrompt && (
+        <div className="fixed bottom-6 right-6 z-50 w-72 rounded-2xl border border-surface-border bg-surface-card shadow-2xl p-5 flex flex-col gap-3 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl leading-none">👋</span>
+            <div>
+              <p className="text-sm font-semibold text-slate-100">New to the calendar?</p>
+              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">Take a quick tour to see how to drag, resize, and book appointments.</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowTourPrompt(false)
+                try { localStorage.setItem(TOUR_KEY, '1') } catch {}
+                setTimeout(startScheduleTour, 100)
+              }}
+              className="flex-1 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent/90 transition-colors"
+            >
+              Take the tour
+            </button>
+            <button
+              onClick={() => {
+                setShowTourPrompt(false)
+                try { localStorage.setItem(TOUR_KEY, '1') } catch {}
+              }}
+              className="rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
