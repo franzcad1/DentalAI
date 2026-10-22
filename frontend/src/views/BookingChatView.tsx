@@ -79,6 +79,34 @@ function ToolCallPanel({ calls }: { calls: AgentToolCall[] }) {
   )
 }
 
+const BANNER_KEY = 'dentalai_rate_banner_dismissed'
+
+function RateLimitBanner() {
+  const [visible, setVisible] = useState(() => {
+    try { return !localStorage.getItem(BANNER_KEY) } catch { return true }
+  })
+
+  if (!visible) return null
+
+  return (
+    <div className="flex items-start gap-3 border-b border-yellow-500/20 bg-yellow-500/5 px-4 sm:px-6 py-2.5">
+      <span className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-yellow-400 animate-pulse" />
+      <p className="flex-1 text-xs text-yellow-300/80 leading-relaxed">
+        Responses may take <span className="font-medium text-yellow-300">10–30 seconds</span> due to Groq's free-tier rate limits. If you hit an error, wait a moment and try again.
+      </p>
+      <button
+        onClick={() => {
+          setVisible(false)
+          try { localStorage.setItem(BANNER_KEY, '1') } catch {}
+        }}
+        className="flex-shrink-0 text-yellow-500/60 hover:text-yellow-300 transition-colors"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
 function LoadingIndicator({ startedAt }: { startedAt: Date }) {
   const [elapsed, setElapsed] = useState(0)
 
@@ -424,6 +452,9 @@ export function BookingChatView() {
           </div>
         </div>
       </div>
+
+      {/* Rate-limit notice banner */}
+      <RateLimitBanner />
 
       {/* Body: chat + optional suggestions panel */}
       <div className="flex flex-1 min-h-0">
