@@ -9,15 +9,19 @@
  *
  * Status filter tabs let you switch between pending / contacted / scheduled / dismissed.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bell, Copy, Check, RefreshCw, Bot, Phone, CalendarCheck, XCircle } from 'lucide-react'
+import { Bell, Copy, Check, RefreshCw, Bot, Phone, CalendarCheck, XCircle, HelpCircle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, type Patient, type PatientRecall, type RecallStatus } from '@/lib/api'
 import { daysOverdue, formatDateShort, todayISO } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { startRecallTour } from '@/hooks/useRecallTour'
+import { WELCOME_DISMISSED_KEY } from '@/components/WelcomeModal'
+
+const RECALL_TOUR_KEY = 'dentalai_recall_tour_done'
 
 interface RecallRow {
   recall: PatientRecall
@@ -36,6 +40,20 @@ export function RecallQueueView() {
   const today = todayISO()
   const qc = useQueryClient()
   const [tab, setTab] = useState<RecallStatus>('pending')
+  const [showTourPrompt, setShowTourPrompt] = useState(false)
+
+  useEffect(() => {
+    try { if (localStorage.getItem(RECALL_TOUR_KEY)) return } catch {}
+    const poll = setInterval(() => {
+      try {
+        if (localStorage.getItem(WELCOME_DISMISSED_KEY)) {
+          clearInterval(poll)
+          setShowTourPrompt(true)
+        }
+      } catch { clearInterval(poll) }
+    }, 300)
+    return () => clearInterval(poll)
+  }, [])
   const [sessionId] = useState(() => `recall-${Date.now()}`)
   const [copied, setCopied] = useState(false)
   const [modal, setModal] = useState({ open: false, patientName: '', message: '', isLoading: false, error: '' })
@@ -128,17 +146,29 @@ export function RecallQueueView() {
             <p className="text-sm text-slate-400">{rows.length} patient{rows.length !== 1 ? 's' : ''} · {tab}</p>
           </div>
         </div>
-        <button
-          onClick={() => recallQuery.refetch()}
-          className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${recallQuery.isFetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="tour-glow-wrap hidden sm:inline-flex">
+            <button
+              onClick={() => startRecallTour()}
+              className="flex items-center gap-1.5 rounded-lg bg-surface-card px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
+              title="Take a tour"
+            >
+              <HelpCircle className="h-3.5 w-3.5" />
+              <span>Tour</span>
+            </button>
+          </span>
+          <button
+            onClick={() => recallQuery.refetch()}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${recallQuery.isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Status tabs */}
-      <div className="flex gap-1 rounded-lg border border-surface-border bg-surface-card p-1 w-fit">
+      <div data-tour="recall-tabs" className="flex gap-1 rounded-lg border border-surface-border bg-surface-card p-1 w-fit">
         {STATUS_TABS.map(t => (
           <button
             key={t.value}
@@ -225,14 +255,14 @@ export function RecallQueueView() {
           </div>
 
           {/* ── Desktop table ───────────────────────────────────────── */}
-          <div className="hidden sm:block rounded-xl border border-surface-border overflow-hidden">
+          <div data-tour="recall-table" className="hidden sm:block rounded-xl border border-surface-border overflow-hidden">
             <div className="grid grid-cols-[1fr_150px_110px_130px_auto] gap-4 border-b border-surface-border bg-surface-raised px-5 py-3">
               {['Patient', 'Recall Type', 'Due Date', 'Overdue', 'Actions'].map(col => (
                 <p key={col} className="text-xs font-medium uppercase tracking-wide text-slate-500">{col}</p>
               ))}
             </div>
             <div className="divide-y divide-surface-border">
-              {rows.map(row => {
+              {rows.map((row, rowIdx) => {
                 const isUpdating = statusMutation.isPending && statusMutation.variables?.id === row.recall.id
                 return (
                   <div key={row.recall.id} className="grid grid-cols-[1fr_150px_110px_130px_auto] items-center gap-4 bg-surface-card px-5 py-3.5 hover:bg-surface-raised transition-colors">
@@ -247,7 +277,7 @@ export function RecallQueueView() {
                     <p className="text-sm text-slate-400 capitalize truncate">{row.recall.recall_type}</p>
                     <p className="text-sm text-slate-400">{formatDateShort(row.recall.due_date)}</p>
                     {urgencyLabel(row.daysOver)}
-                    <div className="flex items-center gap-1.5">
+                    <div {...(rowIdx === 0 ? { 'data-tour': 'recall-actions' } : {})} className="flex items-center gap-1.5">
                       {tab === 'pending' && (
                         <>
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'contacted')} title="Mark as contacted" className="rounded-md p-1.5 text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"><Phone className="h-3.5 w-3.5" /></button>
@@ -275,6 +305,32 @@ export function RecallQueueView() {
       )}
 
       </div>{/* end scrollable content */}
+
+      {/* First-time tour prompt */}
+      {showTourPrompt && (
+        <div className="hidden sm:flex fixed bottom-6 right-6 z-50 w-72 flex-col gap-3 rounded-2xl border border-surface-border bg-surface-card p-4 shadow-2xl">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-medium text-slate-100">👋 New to Recall Queue?</p>
+            <button onClick={() => { try { localStorage.setItem(RECALL_TOUR_KEY, '1') } catch {} setShowTourPrompt(false) }} className="text-slate-500 hover:text-slate-300 transition-colors text-lg leading-none">×</button>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">Take a quick tour to see how to manage overdue patients and draft outreach messages.</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                try { localStorage.setItem(RECALL_TOUR_KEY, '1') } catch {}
+                setShowTourPrompt(false)
+                setTimeout(startRecallTour, 100)
+              }}
+              className="flex-1 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent/90 transition-colors"
+            >
+              Take the tour
+            </button>
+            <button onClick={() => { try { localStorage.setItem(RECALL_TOUR_KEY, '1') } catch {} setShowTourPrompt(false) }} className="rounded-lg border border-surface-border px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised transition-colors">
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Draft message modal */}
       <Dialog open={modal.open} onOpenChange={open => setModal(p => ({ ...p, open }))}>
