@@ -18,7 +18,7 @@ import { api, type Patient, type PatientRecall, type RecallStatus } from '@/lib/
 import { daysOverdue, formatDateShort, todayISO } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { startRecallTour } from '@/hooks/useRecallTour'
+import { startRecallTour, destroyRecallTourIfActive } from '@/hooks/useRecallTour'
 import { WELCOME_DISMISSED_KEY } from '@/components/WelcomeModal'
 
 const RECALL_TOUR_KEY = 'dentalai_recall_tour_done'
@@ -283,7 +283,7 @@ export function RecallQueueView() {
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'contacted')} title="Mark as contacted" className="rounded-md p-1.5 text-blue-400 hover:bg-blue-500/15 transition-colors disabled:opacity-40"><Phone className="h-3.5 w-3.5" /></button>
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'scheduled')} title="Mark as scheduled" className="rounded-md p-1.5 text-green-400 hover:bg-green-500/15 transition-colors disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" /></button>
                           <button disabled={isUpdating} onClick={() => markStatus(row.recall.id, 'dismissed')} title="Dismiss" className="rounded-md p-1.5 text-slate-500 hover:bg-slate-500/15 transition-colors disabled:opacity-40"><XCircle className="h-3.5 w-3.5" /></button>
-                          <button {...(rowIdx === 0 ? { 'data-tour': 'recall-ai-btn' } : {})} onClick={() => handleDraft(row)} title="Draft AI recall message" className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"><Bot className="h-3.5 w-3.5" /></button>
+                          <button {...(rowIdx === 0 ? { 'data-tour': 'recall-ai-btn' } : {})} onClick={() => { destroyRecallTourIfActive(); handleDraft(row) }} title="Draft AI recall message" className="rounded-md p-1.5 text-accent hover:bg-accent/15 transition-colors"><Bot className="h-3.5 w-3.5" /></button>
                         </>
                       )}
                       {tab === 'contacted' && (
