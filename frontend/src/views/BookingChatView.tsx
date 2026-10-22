@@ -92,7 +92,7 @@ function RateLimitBanner() {
     <div className="flex items-start gap-3 border-b border-yellow-500/20 bg-yellow-500/5 px-4 sm:px-6 py-2.5">
       <span className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-yellow-400 animate-pulse" />
       <p className="flex-1 text-xs text-yellow-300/80 leading-relaxed">
-        Responses may take <span className="font-medium text-yellow-300">10–30 seconds</span> due to Groq's free-tier rate limits. If you hit an error, wait a moment and try again.
+        Responses may take <span className="font-medium text-yellow-300">30 seconds to 1 minute</span> due to Groq's free-tier rate limits. If you hit an error, wait a moment and try again.
       </p>
       <button
         onClick={() => {
