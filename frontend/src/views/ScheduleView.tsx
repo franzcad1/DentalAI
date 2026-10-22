@@ -6,7 +6,7 @@
  *   Status badge click — cycle status inline (confirmed → completed → no_show → cancelled)
  *   Notes icon click   — edit notes inline
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Clock, RefreshCw, User, Stethoscope,
@@ -89,6 +89,11 @@ function NewAppointmentDialog({
       const startISO = `${form.date}T${form.time}:00`
       const start = new Date(startISO)
       const end = new Date(start.getTime() + (type?.duration_minutes ?? 30) * 60_000)
+      const closing = new Date(`${form.date}T17:00:00`)
+      if (end > closing) {
+        const endStr = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        throw new Error(`This appointment would end at ${endStr}, after the 5:00 PM closing time. Choose an earlier start time.`)
+      }
       return api.createAppointment({
         patient_id: Number(form.patient_id),
         provider_id: Number(form.provider_id),
@@ -265,6 +270,11 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
       const startISO = `${form.date}T${form.time}:00`
       const start = new Date(startISO)
       const end = new Date(start.getTime() + (type?.duration_minutes ?? 30) * 60_000)
+      const closing = new Date(`${form.date}T17:00:00`)
+      if (end > closing) {
+        const endStr = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        throw new Error(`This appointment would end at ${endStr}, after the 5:00 PM closing time.`)
+      }
       return api.updateAppointment(appt.id, {
         status: form.status,
         notes: form.notes || undefined,
@@ -391,6 +401,157 @@ function NotesCell({ appt }: { appt: Appointment }) {
       <FileText className="h-3 w-3" />
       <span className="truncate max-w-[120px]">{appt.notes || 'Add note…'}</span>
     </button>
+  )
+}
+
+// ─── Dentrix-style appointment grid (desktop only) ───────────────────────────
+
+const GRID_START_H = 8
+const GRID_END_H   = 17
+const SLOTS_TOTAL  = (GRID_END_H - GRID_START_H) * 6  // 54
+
+function slotTop(isoTime: string, slotH: number): number {
+  const d = new Date(isoTime)
+  const mins = d.getHours() * 60 + d.getMinutes() - GRID_START_H * 60
+  return Math.max(0, (mins / 10) * slotH)
+}
+
+function slotHeight(startISO: string, endISO: string, slotH: number): number {
+  const mins = (new Date(endISO).getTime() - new Date(startISO).getTime()) / 60_000
+  return Math.max(slotH, (mins / 10) * slotH)
+}
+
+const GRID_COLORS: Record<AppointmentStatus, string> = {
+  confirmed: 'bg-blue-500/25 border-blue-400/50 text-blue-200',
+  completed: 'bg-green-500/25 border-green-400/50 text-green-200',
+  pending:   'bg-yellow-500/20 border-yellow-400/50 text-yellow-200',
+  no_show:   'bg-red-500/20 border-red-400/50 text-red-300',
+  cancelled: 'bg-slate-500/15 border-slate-500/30 text-slate-500',
+}
+
+interface AppointmentGridProps {
+  appointments: Appointment[]
+  providers: Provider[]
+  patientMap: Map<number, Patient>
+  typeMap: Map<number, string>
+  onClickAppt: (a: Appointment) => void
+}
+
+function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClickAppt }: AppointmentGridProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [slotH, setSlotH] = useState(14)
+
+  // Measure available height and compute slot height to fill without scrolling
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    const update = () => setSlotH(Math.max(10, el.clientHeight / SLOTS_TOTAL))
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const gridHeight = SLOTS_TOTAL * slotH
+
+  // Time labels at each hour and half-hour
+  const timeLabels: { top: number; label: string; isHour: boolean }[] = []
+  for (let slot = 0; slot < SLOTS_TOTAL; slot++) {
+    const totalMins = GRID_START_H * 60 + slot * 10
+    const h = Math.floor(totalMins / 60)
+    const m = totalMins % 60
+    if (m === 0 || m === 30) {
+      const hr = h > 12 ? h - 12 : h === 0 ? 12 : h
+      const ampm = h >= 12 ? 'PM' : 'AM'
+      timeLabels.push({
+        top: slot * slotH,
+        label: m === 0 ? `${hr} ${ampm}` : `${hr}:30`,
+        isHour: m === 0,
+      })
+    }
+  }
+
+  return (
+    <div className="flex flex-col rounded-xl border border-surface-border overflow-hidden flex-1 min-h-0">
+      {/* Provider header row */}
+      <div className="flex border-b border-surface-border bg-surface-card flex-shrink-0">
+        <div className="w-14 flex-shrink-0 border-r border-surface-border" />
+        {providers.map(p => (
+          <div key={p.id} className="flex-1 min-w-[120px] border-r border-surface-border last:border-r-0 px-3 py-2 text-center">
+            <p className="text-xs font-semibold text-slate-200">Dr. {p.last_name}</p>
+            {p.specialty && <p className="text-[10px] text-slate-500 truncate">{p.specialty}</p>}
+          </div>
+        ))}
+      </div>
+
+      {/* Grid body — fills remaining height, scrollable */}
+      <div ref={bodyRef} className="flex flex-1 min-h-0 overflow-y-auto">
+        {/* Time gutter */}
+        <div className="w-14 flex-shrink-0 border-r border-surface-border bg-surface-base relative" style={{ height: gridHeight }}>
+          {timeLabels.map(({ top, label, isHour }) => (
+            <div key={top} className="absolute right-2 select-none" style={{ top: top - 6 }}>
+              <span className={`text-[10px] leading-none ${isHour ? 'text-slate-400 font-medium' : 'text-slate-600'}`}>
+                {label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* One column per provider */}
+        {providers.map(provider => {
+          const provAppts = appointments.filter(a => a.provider_id === provider.id)
+          return (
+            <div
+              key={provider.id}
+              className="flex-1 min-w-[120px] relative border-r border-surface-border last:border-r-0 bg-surface-base"
+              style={{ height: gridHeight }}
+            >
+              {/* Horizontal grid lines */}
+              {Array.from({ length: SLOTS_TOTAL }, (_, i) => (
+                <div
+                  key={i}
+                  className={`absolute inset-x-0 border-t pointer-events-none ${
+                    i % 6 === 0 ? 'border-surface-border'
+                    : i % 3 === 0 ? 'border-surface-border/50'
+                    : 'border-surface-border/20'
+                  }`}
+                  style={{ top: i * slotH }}
+                />
+              ))}
+
+              {/* Appointment blocks */}
+              {provAppts.map(appt => {
+                const top    = slotTop(appt.start_time, slotH)
+                const height = slotHeight(appt.start_time, appt.end_time, slotH)
+                const patient  = patientMap.get(appt.patient_id)
+                const typeName = typeMap.get(appt.appointment_type_id) ?? ''
+                const colorCls = GRID_COLORS[appt.status]
+
+                return (
+                  <div
+                    key={appt.id}
+                    onClick={() => onClickAppt(appt)}
+                    title={`${patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`} · ${typeName} · ${formatTime(appt.start_time)}`}
+                    className={`absolute inset-x-1 rounded border cursor-pointer overflow-hidden px-1.5 py-0.5 ${colorCls} hover:brightness-125 transition-all z-10`}
+                    style={{ top: top + 1, height: height - 2 }}
+                  >
+                    <p className="text-[11px] font-semibold leading-tight truncate">
+                      {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
+                    </p>
+                    {height > slotH * 1.5 && (
+                      <p className="text-[10px] leading-tight opacity-80 truncate">{typeName}</p>
+                    )}
+                    {height > slotH * 3 && (
+                      <p className="text-[10px] leading-tight opacity-60">{formatTime(appt.start_time)}</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -521,125 +682,163 @@ export function ScheduleView() {
       </div>
       </div>{/* end sticky header */}
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
-
-      {/* Stats strip */}
-      {!isLoading && !error && (
-        <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {(['confirmed', 'completed', 'no_show', 'cancelled'] as AppointmentStatus[]).map(s => {
-            const count = appointments.filter(a => a.status === s).length
-            const colors = statusColors(s)
-            return (
-              <div key={s} className="rounded-lg border border-surface-border bg-surface-card p-3">
-                <p className={`text-2xl font-bold ${colors.text}`}>{count}</p>
-                <p className="text-xs text-slate-500 capitalize">{statusLabel(s)}</p>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-20 animate-pulse rounded-xl bg-surface-card border border-surface-border" />
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
-          Failed to load: {String(error)}
-        </div>
-      )}
-
-      {!isLoading && !error && appointments.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-surface-border py-16 text-center">
-          <CalendarDays className="mb-3 h-10 w-10 text-slate-600" />
-          <p className="text-slate-400">No appointments {selectedDate === 'all' ? 'found' : selectedDate === today ? 'today' : 'on this day'}</p>
-          <Button size="sm" className="mt-4 gap-1.5" onClick={() => setShowNewAppt(true)}>
-            <Plus className="h-3.5 w-3.5" /> Book one now
-          </Button>
-        </div>
-      )}
-
-      {/* Appointment rows */}
-      {!isLoading && !error && appointments.length > 0 && (
-        <div className="space-y-2">
-          {appointments.map(appt => {
-            const patient  = patientMap.get(appt.patient_id)
-            const provider = providerMap.get(appt.provider_id)
-            const typeName = typeMap.get(appt.appointment_type_id) ?? 'Unknown'
-            const colors   = statusColors(appt.status)
-            const isUpdating = statusMutation.isPending && statusMutation.variables?.id === appt.id
-
-            return (
-              <div
-                key={appt.id}
-                onClick={() => setEditAppt(appt)}
-                className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface-card p-3 sm:p-4 hover:bg-surface-raised transition-colors cursor-pointer"
-              >
-                <div className={`h-10 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
-
-                {/* Time */}
-                <div className="w-20 sm:w-24 flex-shrink-0">
-                  <p className="text-sm font-semibold text-slate-200">{formatTime(appt.start_time)}</p>
-                  <p className="flex items-center gap-1 text-xs text-slate-500">
-                    <Clock className="h-3 w-3" />{formatTime(appt.end_time)}
-                  </p>
-                  {selectedDate === 'all' && (
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {new Date(appt.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </p>
-                  )}
+      {/* ── Mobile / "All" scrollable layout ── */}
+      <div className={`flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 ${selectedDate !== 'all' ? 'md:hidden' : ''}`}>
+        {/* Stats strip */}
+        {!isLoading && !error && (
+          <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {(['confirmed', 'completed', 'no_show', 'cancelled'] as AppointmentStatus[]).map(s => {
+              const count = appointments.filter(a => a.status === s).length
+              const colors = statusColors(s)
+              return (
+                <div key={s} className="rounded-lg border border-surface-border bg-surface-card p-3">
+                  <p className={`text-2xl font-bold ${colors.text}`}>{count}</p>
+                  <p className="text-xs text-slate-500 capitalize">{statusLabel(s)}</p>
                 </div>
+              )
+            })}
+          </div>
+        )}
 
-                {/* Patient */}
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-surface-raised">
-                    <User className="h-4 w-4 text-slate-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-200">
-                      {patient ? `${patient.first_name} ${patient.last_name}` : `Patient #${appt.patient_id}`}
-                    </p>
-                    <p className="truncate text-xs text-slate-500 capitalize">{typeName}</p>
-                  </div>
-                </div>
+        {isLoading && (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-20 animate-pulse rounded-xl bg-surface-card border border-surface-border" />
+            ))}
+          </div>
+        )}
 
-                {/* Provider */}
-                <div className="hidden w-36 flex-shrink-0 sm:block">
-                  <p className="flex items-center gap-1.5 text-xs text-slate-400">
-                    <Stethoscope className="h-3 w-3" />
-                    {provider ? `Dr. ${provider.last_name}` : `#${appt.provider_id}`}
-                  </p>
-                </div>
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+            Failed to load: {String(error)}
+          </div>
+        )}
 
-                {/* Notes */}
-                <div className="hidden w-36 flex-shrink-0 lg:block">
-                  <NotesCell appt={appt} />
-                </div>
+        {!isLoading && !error && appointments.length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-surface-border py-16 text-center">
+            <CalendarDays className="mb-3 h-10 w-10 text-slate-600" />
+            <p className="text-slate-400">No appointments {selectedDate === 'all' ? 'found' : selectedDate === today ? 'today' : 'on this day'}</p>
+            <Button size="sm" className="mt-4 gap-1.5" onClick={() => setShowNewAppt(true)}>
+              <Plus className="h-3.5 w-3.5" /> Book one now
+            </Button>
+          </div>
+        )}
 
-                {/* Status — click to advance (stop propagation so row click doesn't fire) */}
-                <button
-                  disabled={isUpdating}
-                  onClick={e => { e.stopPropagation(); statusMutation.mutate({ id: appt.id, status: NEXT_STATUS[appt.status] }) }}
-                  title={`Click to mark as ${statusLabel(NEXT_STATUS[appt.status])}`}
-                  className="flex-shrink-0 transition-opacity disabled:opacity-50"
+        {!isLoading && !error && appointments.length > 0 && (
+          <div className="space-y-2">
+            {appointments.map(appt => {
+              const patient  = patientMap.get(appt.patient_id)
+              const provider = providerMap.get(appt.provider_id)
+              const typeName = typeMap.get(appt.appointment_type_id) ?? 'Unknown'
+              const colors   = statusColors(appt.status)
+              const isUpdating = statusMutation.isPending && statusMutation.variables?.id === appt.id
+
+              return (
+                <div
+                  key={appt.id}
+                  onClick={() => setEditAppt(appt)}
+                  className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface-card p-3 sm:p-4 hover:bg-surface-raised transition-colors cursor-pointer"
                 >
-                  <Badge variant={statusVariant(appt.status)} className="cursor-pointer hover:opacity-80">
-                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${colors.dot}`} />
-                    {isUpdating ? '…' : statusLabel(appt.status)}
-                  </Badge>
-                </button>
-              </div>
-            )
-          })}
+                  <div className={`h-10 w-1 flex-shrink-0 rounded-full ${colors.dot}`} />
+                  <div className="w-20 sm:w-24 flex-shrink-0">
+                    <p className="text-sm font-semibold text-slate-200">{formatTime(appt.start_time)}</p>
+                    <p className="flex items-center gap-1 text-xs text-slate-500">
+                      <Clock className="h-3 w-3" />{formatTime(appt.end_time)}
+                    </p>
+                    {selectedDate === 'all' && (
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {new Date(appt.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-surface-raised">
+                      <User className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-200">
+                        {patient ? `${patient.first_name} ${patient.last_name}` : `Patient #${appt.patient_id}`}
+                      </p>
+                      <p className="truncate text-xs text-slate-500 capitalize">{typeName}</p>
+                    </div>
+                  </div>
+                  <div className="hidden w-36 flex-shrink-0 sm:block">
+                    <p className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <Stethoscope className="h-3 w-3" />
+                      {provider ? `Dr. ${provider.last_name}` : `#${appt.provider_id}`}
+                    </p>
+                  </div>
+                  <div className="hidden w-36 flex-shrink-0 lg:block">
+                    <NotesCell appt={appt} />
+                  </div>
+                  <button
+                    disabled={isUpdating}
+                    onClick={e => { e.stopPropagation(); statusMutation.mutate({ id: appt.id, status: NEXT_STATUS[appt.status] }) }}
+                    title={`Click to mark as ${statusLabel(NEXT_STATUS[appt.status])}`}
+                    className="flex-shrink-0 transition-opacity disabled:opacity-50"
+                  >
+                    <Badge variant={statusVariant(appt.status)} className="cursor-pointer hover:opacity-80">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${colors.dot}`} />
+                      {isUpdating ? '…' : statusLabel(appt.status)}
+                    </Badge>
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Desktop grid layout — fills remaining height, no scroll ── */}
+      {selectedDate !== 'all' && (
+        <div className="hidden md:flex md:flex-col flex-1 min-h-0 px-4 sm:px-6 pb-4 gap-3">
+          {/* Compact stats row */}
+          {!isLoading && !error && (
+            <div className="flex gap-3 flex-shrink-0">
+              {(['confirmed', 'completed', 'no_show', 'cancelled'] as AppointmentStatus[]).map(s => {
+                const count = appointments.filter(a => a.status === s).length
+                const colors = statusColors(s)
+                return (
+                  <div key={s} className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+                    <p className={`text-lg font-bold ${colors.text}`}>{count}</p>
+                    <p className="text-xs text-slate-500 capitalize">{statusLabel(s)}</p>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="flex-1 animate-pulse rounded-xl bg-surface-card border border-surface-border" />
+          )}
+
+          {error && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+              Failed to load: {String(error)}
+            </div>
+          )}
+
+          {!isLoading && !error && appointments.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-surface-border text-center">
+              <CalendarDays className="mb-3 h-10 w-10 text-slate-600" />
+              <p className="text-slate-400">{selectedDate === today ? 'No appointments today' : 'No appointments on this day'}</p>
+              <Button size="sm" className="mt-4 gap-1.5" onClick={() => setShowNewAppt(true)}>
+                <Plus className="h-3.5 w-3.5" /> Book one now
+              </Button>
+            </div>
+          )}
+
+          {!isLoading && !error && appointments.length > 0 && (
+            <AppointmentGrid
+              appointments={appointments}
+              providers={providerQuery.data?.data.items ?? []}
+              patientMap={patientMap}
+              typeMap={typeMap}
+              onClickAppt={setEditAppt}
+            />
+          )}
         </div>
       )}
-
-      </div>{/* end scrollable content */}
 
       {/* New appointment dialog */}
       <NewAppointmentDialog

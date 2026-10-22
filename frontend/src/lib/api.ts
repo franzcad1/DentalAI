@@ -120,6 +120,10 @@ async function request<T>(
 // ─── API functions ────────────────────────────────────────────────────────────
 
 export const api = {
+  // Health / metadata
+  getHealth: () =>
+    request<{ status: string; version: string; startup_id: string }>('/health'),
+
   // Patients
   getPatients: (params?: { name?: string; email?: string; limit?: number }) => {
     const qs = new URLSearchParams()

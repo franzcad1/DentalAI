@@ -13,6 +13,7 @@ Lifespan sequence:
 
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, List
 
@@ -31,6 +32,8 @@ from app.events.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
+
+STARTUP_ID = str(uuid.uuid4())
 
 
 @asynccontextmanager
@@ -75,7 +78,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:
-        return {"status": "ok", "version": "0.2.0"}
+        return {"status": "ok", "version": "0.2.0", "startup_id": STARTUP_ID}
 
     # NexHealth-style CRUD routes
     app.include_router(patients.router, prefix="/api/v1")

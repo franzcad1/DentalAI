@@ -23,6 +23,25 @@ book_appointment(patient_id, slot_id, appointment_type_id, notes="")
     4. Fires appointment.booked event through the event bus.
     → Confirmation string with appointment_id and slot details
 
+delete_appointment(appointment_id)
+    Permanently removes the appointment row from the database.
+    Frees the associated slot. Use when user says "delete" or "remove".
+    → Confirmation string with patient name and time.
+
+cancel_appointment(appointment_id)
+    Sets appointment status to "cancelled" (record is kept).
+    Use when user says "cancel". → Confirmation string with patient name and old time.
+
+update_appointment_status(appointment_id, status)
+    Sets appointment status to any valid value:
+    confirmed | completed | pending | no_show | cancelled
+    → Confirmation string showing the status transition.
+
+reschedule_appointment(appointment_id, new_slot_id)
+    Frees the old slot and moves the appointment to a new slot.
+    Enforces 5 PM closing time on the new slot.
+    → Confirmation string with old and new times.
+
 get_patient_context(patient_id)
     Returns a compact patient summary: demographics, most recent
     appointment (status, date, provider), and current recall status.
@@ -152,10 +171,13 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
         if provider_id and provider_id != 0:
             q = q.filter(AvailableSlot.provider_id == provider_id)
 
-        slots = q.order_by(AvailableSlot.start_time).limit(50).all()
+        slots = q.order_by(AvailableSlot.start_time).limit(200).all()
+
+        # Exclude slots whose start time is at or after 17:00 (nothing can finish by 5 PM)
+        slots = [s for s in slots if s.start_time.hour < 17]
 
         result = []
-        for s in slots:
+        for s in slots[:50]:
             provider = db.get(Provider, s.provider_id)
             provider_name = (
                 f"Dr. {provider.first_name} {provider.last_name}"
@@ -216,6 +238,13 @@ def book_appointment(
             return f"Error: appointment type {appointment_type_id} not found."
 
         end_time = slot.start_time + timedelta(minutes=appt_type.duration_minutes)
+        cutoff = slot.start_time.replace(hour=17, minute=0, second=0, microsecond=0)
+        if end_time > cutoff:
+            return (
+                f"Error: this appointment would end at {end_time.strftime('%I:%M %p')}, "
+                f"which is after the 5:00 PM closing time. "
+                f"Please choose an earlier slot."
+            )
         appt = Appointment(
             patient_id=patient_id,
             provider_id=slot.provider_id,
@@ -750,6 +779,185 @@ def draft_recall_message(patient_id: int) -> str:
         db.close()
 
 
+@tool
+def delete_appointment(appointment_id: int) -> str:
+    """Permanently delete an appointment from the system.
+
+    Use this when the user explicitly asks to delete or remove an appointment.
+    This cannot be undone. The associated slot is freed (is_booked = False).
+
+    Args:
+        appointment_id: The ID of the appointment to delete.
+
+    Returns:
+        Confirmation string, or an error if the appointment is not found.
+    """
+    db = SessionLocal()
+    try:
+        appt = db.get(Appointment, appointment_id)
+        if not appt:
+            return f"Error: appointment {appointment_id} not found."
+        patient = db.get(Patient, appt.patient_id)
+        patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
+        appt_time = appt.start_time.strftime('%A, %B %d at %I:%M %p')
+
+        # Free the matching slot if it exists
+        old_slot = (
+            db.query(AvailableSlot)
+            .filter(
+                AvailableSlot.provider_id == appt.provider_id,
+                AvailableSlot.start_time == appt.start_time,
+            )
+            .first()
+        )
+        if old_slot:
+            old_slot.is_booked = False
+
+        db.delete(appt)
+        db.commit()
+        return f"Appointment for {patient_name} on {appt_time} has been permanently deleted."
+    finally:
+        db.close()
+
+
+@tool
+def cancel_appointment(appointment_id: int) -> str:
+    """Cancel an existing appointment by setting its status to 'cancelled'.
+
+    Args:
+        appointment_id: The ID of the appointment to cancel.
+
+    Returns:
+        Confirmation string, or an error if the appointment is not found.
+    """
+    db = SessionLocal()
+    try:
+        appt = db.get(Appointment, appointment_id)
+        if not appt:
+            return f"Error: appointment {appointment_id} not found."
+        if appt.status == "cancelled":
+            return f"Appointment {appointment_id} is already cancelled."
+        old_status = appt.status
+        appt.status = "cancelled"
+        db.commit()
+        patient = db.get(Patient, appt.patient_id)
+        patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
+        return (
+            f"Appointment {appointment_id} for {patient_name} has been cancelled.\n"
+            f"  Was: {old_status} on {appt.start_time.strftime('%A, %B %d at %I:%M %p')}"
+        )
+    finally:
+        db.close()
+
+
+@tool
+def update_appointment_status(appointment_id: int, status: str) -> str:
+    """Update the status of an existing appointment.
+
+    Valid statuses: confirmed, completed, pending, no_show, cancelled.
+
+    Args:
+        appointment_id: The ID of the appointment to update.
+        status:         The new status string.
+
+    Returns:
+        Confirmation string, or an error if appointment not found or status invalid.
+    """
+    valid = {"confirmed", "completed", "pending", "no_show", "cancelled"}
+    if status not in valid:
+        return f"Error: '{status}' is not a valid status. Choose from: {', '.join(sorted(valid))}."
+    db = SessionLocal()
+    try:
+        appt = db.get(Appointment, appointment_id)
+        if not appt:
+            return f"Error: appointment {appointment_id} not found."
+        old_status = appt.status
+        appt.status = status
+        db.commit()
+        patient = db.get(Patient, appt.patient_id)
+        patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
+        return (
+            f"Appointment {appointment_id} for {patient_name} updated.\n"
+            f"  Status: {old_status} → {status}\n"
+            f"  Time  : {appt.start_time.strftime('%A, %B %d at %I:%M %p')}"
+        )
+    finally:
+        db.close()
+
+
+@tool
+def reschedule_appointment(appointment_id: int, new_slot_id: int) -> str:
+    """Move an existing appointment to a different available slot.
+
+    The old slot is freed (is_booked = False) and the new slot is reserved.
+
+    Args:
+        appointment_id: The ID of the appointment to reschedule.
+        new_slot_id:    The ID of the new AvailableSlot to move the appointment to.
+
+    Returns:
+        Confirmation string with old and new times, or an error message.
+    """
+    db = SessionLocal()
+    try:
+        appt = db.get(Appointment, appointment_id)
+        if not appt:
+            return f"Error: appointment {appointment_id} not found."
+
+        new_slot = db.get(AvailableSlot, new_slot_id)
+        if not new_slot:
+            return f"Error: slot {new_slot_id} does not exist."
+        if new_slot.is_booked:
+            return f"Error: slot {new_slot_id} is already booked. Please choose a different slot."
+
+        # Enforce 5 PM closing time
+        appt_type = db.get(AppointmentType, appt.appointment_type_id)
+        duration = appt_type.duration_minutes if appt_type else 30
+        new_end = new_slot.start_time + timedelta(minutes=duration)
+        closing = new_slot.start_time.replace(hour=17, minute=0, second=0, microsecond=0)
+        if new_end > closing:
+            return (
+                f"Error: rescheduling to that slot would end at {new_end.strftime('%I:%M %p')}, "
+                f"after the 5:00 PM closing time."
+            )
+
+        old_time = appt.start_time
+
+        # Free the old slot if one exists
+        old_slot = (
+            db.query(AvailableSlot)
+            .filter(
+                AvailableSlot.provider_id == appt.provider_id,
+                AvailableSlot.start_time == appt.start_time,
+            )
+            .first()
+        )
+        if old_slot:
+            old_slot.is_booked = False
+
+        # Update the appointment
+        appt.start_time = new_slot.start_time
+        appt.end_time = new_end
+        appt.provider_id = new_slot.provider_id
+        appt.location_id = new_slot.location_id
+        appt.status = "confirmed"
+        new_slot.is_booked = True
+        db.commit()
+
+        patient = db.get(Patient, appt.patient_id)
+        patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
+        provider = db.get(Provider, new_slot.provider_id)
+        provider_name = f"Dr. {provider.first_name} {provider.last_name}" if provider else "Provider"
+        return (
+            f"Appointment {appointment_id} for {patient_name} rescheduled.\n"
+            f"  From: {old_time.strftime('%A, %B %d at %I:%M %p')}\n"
+            f"  To  : {new_slot.start_time.strftime('%A, %B %d at %I:%M %p')}\n"
+            f"  Provider: {provider_name}"
+        )
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — maps name → callable and builds OpenAI function schemas
 # ---------------------------------------------------------------------------
@@ -763,6 +971,10 @@ TOOLS = [
     get_appointments_for_date,
     check_available_slots,
     book_appointment,
+    delete_appointment,
+    cancel_appointment,
+    update_appointment_status,
+    reschedule_appointment,
     get_patient_context,
     get_recall_queue,
     draft_recall_message,
@@ -818,6 +1030,10 @@ _SYSTEM_PROMPT = (
     "- Look up all booked appointments for a day using get_appointments_for_date\n"
     "- Find open appointment slots for patients\n"
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
+    "- Permanently delete an appointment using delete_appointment(appointment_id) — use when the user says 'delete', 'remove', or 'get rid of'\n"
+    "- Cancel an appointment (keeps the record) using cancel_appointment(appointment_id) — use when the user says 'cancel'\n"
+    "- Change an appointment's status using update_appointment_status(appointment_id, status)\n"
+    "- Move an appointment to a new slot using reschedule_appointment(appointment_id, new_slot_id)\n"
     "- Retrieve patient history and recall status\n"
     "- Identify overdue patients who need outreach\n"
     "- Draft personalised recall messages\n\n"
@@ -832,6 +1048,10 @@ _SYSTEM_PROMPT = (
     "When asked whether a patient has an appointment (e.g. 'does X have an appointment this week'), "
     "search for the patient first, then call get_patient_appointments with their patient_id. "
     "NEVER call get_appointments_for_date repeatedly for each day — that wastes iterations.\n\n"
+    "IMPORTANT — office hours:\n"
+    "The practice closes at 5:00 PM. Never book or suggest a slot whose appointment end time would exceed 17:00. "
+    "If a user requests a late slot and the appointment type's duration would push past 5:00 PM, "
+    "tell them the latest available start time for that duration instead.\n\n"
     "IMPORTANT — booking flow:\n"
     "1. When you present a numbered list of slots, mentally keep the slot_id for each number.\n"
     "2. When the user picks a slot by number (e.g. '#3' or 'option 2'), DO NOT call check_available_slots again.\n"

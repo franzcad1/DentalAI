@@ -1,22 +1,36 @@
 import { useState, useEffect } from 'react'
 import { Stethoscope, Calendar, Bell, MessageSquare, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
 
-const WELCOME_KEY = 'dentalai_welcome_seen'
+const STARTUP_KEY = 'dentalai_startup_id'
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    try {
-      if (!localStorage.getItem(WELCOME_KEY)) setOpen(true)
-    } catch {
-      setOpen(true)
-    }
+    // Show the modal whenever the backend has restarted (new startup_id)
+    api.getHealth().then(({ startup_id }) => {
+      try {
+        const seen = localStorage.getItem(STARTUP_KEY)
+        if (seen !== startup_id) setOpen(true)
+      } catch {
+        setOpen(true)
+      }
+    }).catch(() => {
+      // Backend offline — show modal so cold-start notice is visible
+      try {
+        if (!localStorage.getItem(STARTUP_KEY)) setOpen(true)
+      } catch {
+        setOpen(true)
+      }
+    })
   }, [])
 
   function dismiss() {
-    try { localStorage.setItem(WELCOME_KEY, '1') } catch {}
+    api.getHealth().then(({ startup_id }) => {
+      try { localStorage.setItem(STARTUP_KEY, startup_id) } catch {}
+    }).catch(() => {})
     setOpen(false)
   }
 

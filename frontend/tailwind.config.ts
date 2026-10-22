@@ -63,6 +63,7 @@ const config: Config = {
     'sm:grid-cols-4',
     'sm:block',
     'sm:inline',
+    'md:block',
   ],
   plugins: [],
 }

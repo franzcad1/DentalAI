@@ -39,10 +39,13 @@ APPOINTMENT_TYPE_DEFS = [
 ]
 
 
-def _random_business_time(base_date: date) -> datetime:
-    """Return a random datetime between 8am and 5pm on base_date."""
-    hour = rng.randint(8, 16)
-    minute = rng.choice([0, 15, 30, 45])
+def _random_business_time(base_date: date, duration_minutes: int = 30) -> datetime:
+    """Return a random start time that guarantees the appointment finishes by 17:00."""
+    latest_start_minutes = 17 * 60 - duration_minutes  # e.g. 16:30 for a 30-min appt
+    start_minutes = rng.randint(8 * 60, latest_start_minutes)
+    # Round down to nearest 15-min boundary
+    start_minutes = (start_minutes // 15) * 15
+    hour, minute = divmod(start_minutes, 60)
     return datetime(base_date.year, base_date.month, base_date.day, hour, minute, tzinfo=timezone.utc)
 
 
@@ -117,7 +120,7 @@ def run_seed() -> None:
             # 2–4 appointments per day
             for _ in range(rng.randint(2, 4)):
                 appt_type = rng.choice(appt_types)
-                start = _random_business_time(day)
+                start = _random_business_time(day, appt_type.duration_minutes)
                 end = start + timedelta(minutes=appt_type.duration_minutes)
                 status = rng.choices(
                     APPOINTMENT_STATUSES_HISTORY,
@@ -190,7 +193,7 @@ def run_seed() -> None:
         today_appts = 0
         for _ in range(rng.randint(5, 7)):
             appt_type = rng.choice(appt_types)
-            start = _random_business_time(today)
+            start = _random_business_time(today, appt_type.duration_minutes)
             end = start + timedelta(minutes=appt_type.duration_minutes)
             # Mix of confirmed/completed/no_show for a realistic day
             status = rng.choices(
@@ -274,6 +277,30 @@ def refresh_slots() -> None:
 
         db.commit()
         print("==> Slots refreshed for next 28 days.")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def fix_late_appointments() -> None:
+    """Clamp any existing appointment that ends after 17:00 to end at 17:00.
+
+    Safe to run on every startup — is a no-op when no violations exist.
+    """
+    db = SessionLocal()
+    try:
+        appts = db.query(Appointment).all()
+        fixed = 0
+        for appt in appts:
+            closing = appt.end_time.replace(hour=17, minute=0, second=0, microsecond=0)
+            if appt.end_time > closing:
+                appt.end_time = closing
+                fixed += 1
+        if fixed:
+            db.commit()
+            print(f"[fix_late_appointments] Clamped {fixed} appointment(s) to 5:00 PM.")
     except Exception:
         db.rollback()
         raise
