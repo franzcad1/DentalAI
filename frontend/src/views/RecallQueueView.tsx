@@ -311,7 +311,7 @@ export function RecallQueueView() {
         <div className="hidden sm:flex fixed bottom-6 right-6 z-50 w-72 flex-col gap-3 rounded-2xl border border-surface-border bg-surface-card p-4 shadow-2xl">
           <div className="flex items-start justify-between gap-2">
             <p className="text-sm font-medium text-slate-100">👋 New to Recall Queue?</p>
-            <button onClick={() => { try { localStorage.setItem(RECALL_TOUR_KEY, '1') } catch {} setShowTourPrompt(false) }} className="text-slate-500 hover:text-slate-300 transition-colors text-lg leading-none">×</button>
+            <button onClick={() => { try { localStorage.setItem(RECALL_TOUR_KEY, '1') } catch {} setShowTourPrompt(false) }} className="text-red-500 hover:text-red-400 transition-colors text-lg leading-none">×</button>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">Take a quick tour to see how to manage overdue patients and draft outreach messages.</p>
           <div className="flex gap-2">

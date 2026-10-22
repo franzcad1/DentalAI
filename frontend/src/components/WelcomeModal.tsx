@@ -44,7 +44,7 @@ export function WelcomeModal() {
         {/* Close */}
         <button
           onClick={dismiss}
-          className="absolute right-4 top-4 text-slate-500 hover:text-slate-300 transition-colors"
+          className="absolute right-4 top-4 text-red-500 hover:text-red-400 transition-colors"
         >
           <X className="h-4 w-4" />
         </button>

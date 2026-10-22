@@ -280,7 +280,7 @@ function SuggestionsPanel({
           <Lightbulb className="h-4 w-4 text-accent" />
           <span className="text-sm font-medium text-slate-200">Suggestions</span>
         </div>
-        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+        <button onClick={onClose} className="text-red-500 hover:text-red-400 transition-colors">
           <X className="h-4 w-4" />
         </button>
       </div>
