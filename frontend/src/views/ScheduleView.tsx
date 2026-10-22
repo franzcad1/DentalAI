@@ -674,6 +674,26 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                 />
               ))}
 
+              {/* Ghost preview block for block-move drag — rendered once per column */}
+              {(() => {
+                if (!blockDrag || blockDrag.previewProviderId !== provider.id) return null
+                const movingAppt = appointments.find(a => a.id === blockDrag.apptId)
+                const colorCls = movingAppt ? GRID_COLORS[movingAppt.status] : 'bg-accent/30 border-accent/50'
+                return (
+                  <div
+                    className={`absolute inset-x-1 rounded border z-30 pointer-events-none ${
+                      blockDrag.isConflict
+                        ? 'bg-red-500/30 border-red-400/70'
+                        : `${colorCls} opacity-60`
+                    }`}
+                    style={{
+                      top: slotTop(blockDrag.previewStartISO, slotH) + 1,
+                      height: slotHeight(blockDrag.previewStartISO, blockDrag.previewEndISO, slotH) - 2,
+                    }}
+                  />
+                )
+              })()}
+
               {/* Appointment blocks */}
               {provAppts.map(appt => {
                 const isResizing = drag?.apptId === appt.id
@@ -690,20 +710,6 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
 
                 return (
                   <div key={appt.id}>
-                    {/* Ghost preview block shown in THIS column when moving here */}
-                    {isMoving && blockDrag.previewProviderId === provider.id && (
-                      <div
-                        className={`absolute inset-x-1 rounded border z-30 pointer-events-none ${
-                          blockDrag.isConflict
-                            ? 'bg-red-500/30 border-red-400/70'
-                            : `${colorCls} opacity-60`
-                        }`}
-                        style={{
-                          top: slotTop(blockDrag.previewStartISO, slotH) + 1,
-                          height: slotHeight(blockDrag.previewStartISO, blockDrag.previewEndISO, slotH) - 2,
-                        }}
-                      />
-                    )}
 
                     {/* Original block */}
                     <div

@@ -237,10 +237,11 @@ export const api = {
     request<string[]>(`/api/v1/patients/sample?n=${n}`),
 
   // Agent
-  agentChat: (message: string, sessionId: string) =>
+  agentChat: (message: string, sessionId: string, signal?: AbortSignal) =>
     request<AgentChatResponse>('/api/v1/agent/chat', {
       method: 'POST',
       body: JSON.stringify({ message, session_id: sessionId }),
+      signal,
     }),
 
   agentStatus: (sessionId: string) =>

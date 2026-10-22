@@ -99,7 +99,7 @@ function RateLimitBanner() {
     <div className="flex items-start gap-3 border-b border-yellow-500/20 bg-yellow-500/5 px-4 sm:px-6 py-2.5">
       <span className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-yellow-400 animate-pulse" />
       <p className="flex-1 text-xs text-yellow-300/80 leading-relaxed">
-        Responses may take <span className="font-medium text-yellow-300">45 seconds to 1 minute 30 seconds</span> due to Groq's free-tier rate limits. If you hit an error, wait a moment and try again.
+        Responses may take <span className="font-medium text-yellow-300">over 1 minute</span> due to Groq's free-tier rate limits. If you hit an error, wait a moment and try again.
       </p>
       <button
         onClick={() => {
@@ -349,6 +349,7 @@ export function BookingChatView() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   // Keep a flat list for the empty-state quick buttons
   const suggestions = suggestionGroups.map(g => g.prompts[0])
@@ -388,6 +389,9 @@ export function BookingChatView() {
     setInput('')
     setIsLoading(true)
 
+    const abort = new AbortController()
+    abortRef.current = abort
+
     // Poll for retry status while the agent is working
     const pollInterval = setInterval(async () => {
       try {
@@ -401,7 +405,7 @@ export function BookingChatView() {
     }, 1000)
 
     try {
-      const result = await api.agentChat(trimmed, sessionId)
+      const result = await api.agentChat(trimmed, sessionId, abort.signal)
       clearInterval(pollInterval)
       setMessages((prev) =>
         prev.map((m) =>
@@ -430,19 +434,26 @@ export function BookingChatView() {
       } catch { /* ignore */ }
 
       const errorMsg =
-        msg.includes('503')
+        err instanceof Error && err.name === 'AbortError'
+          ? null  // user cancelled — remove the bubble silently
+          : msg.includes('503')
           ? 'Agent unavailable — the backend is not reachable.'
           : msg.includes('429') || msg.includes('rate limit') || msg.includes('too large')
           ? detail
           : msg
 
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsg.id
-            ? { ...m, content: '', error: errorMsg, isLoading: false }
-            : m
+      if (errorMsg === null) {
+        // Cancelled by user — remove the loading bubble
+        setMessages((prev) => prev.filter((m) => m.id !== loadingMsg.id))
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === loadingMsg.id
+              ? { ...m, content: '', error: errorMsg, isLoading: false }
+              : m
+          )
         )
-      )
+      }
     } finally {
       setIsLoading(false)
       inputRef.current?.focus()
@@ -452,6 +463,11 @@ export function BookingChatView() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     sendMessage(input)
+  }
+
+  function cancelRequest() {
+    abortRef.current?.abort()
+    abortRef.current = null
   }
 
   return (
@@ -557,13 +573,15 @@ export function BookingChatView() {
             className="flex-1 h-11 bg-surface-raised text-base sm:text-sm"
             autoFocus
           />
-          <Button type="submit" disabled={!input.trim() || isLoading} size="icon" className="h-11 w-11">
-            {isLoading ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
+          {isLoading ? (
+            <Button type="button" onClick={cancelRequest} size="icon" className="h-11 w-11 bg-red-600 hover:bg-red-700 border-red-500" title="Cancel">
+              <X className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button type="submit" disabled={!input.trim()} size="icon" className="h-11 w-11">
               <Send className="h-4 w-4" />
-            )}
-          </Button>
+            </Button>
+          )}
         </form>
         <p className="mt-2 text-center text-xs text-slate-600">
           Session: <code className="text-slate-500">{sessionId}</code>

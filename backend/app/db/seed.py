@@ -9,6 +9,7 @@ clean, reproducible dataset every time.
 
 import random
 from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 from faker import Faker
 
@@ -54,7 +55,7 @@ def _find_free_slot(
     provider_id: int,
     booked: dict,  # { (provider_id, date) -> list of (start_min, end_min) }
     max_tries: int = 20,
-) -> datetime | None:
+) -> Optional[datetime]:
     """Return a non-overlapping start time for the given provider/day, or None."""
     latest_start = 17 * 60 - duration_minutes
     slots = booked.setdefault((provider_id, base_date), [])
