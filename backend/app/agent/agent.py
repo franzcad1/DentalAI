@@ -573,6 +573,50 @@ def list_patients_by_provider(provider_name: str) -> str:
 
 
 @tool
+def get_patient_appointments(patient_id: int, days_ahead: int = 14) -> str:
+    """Return upcoming and recent appointments for a specific patient.
+
+    Args:
+        patient_id: The patient's ID.
+        days_ahead: How many days into the future to look (default 14).
+
+    Returns:
+        JSON list of appointments sorted by date, with provider, type, status.
+    """
+    db = SessionLocal()
+    try:
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        future = today + timedelta(days=days_ahead)
+        # Past 30 days + future window
+        past = today - timedelta(days=30)
+        appts = (
+            db.query(Appointment)
+            .filter(Appointment.patient_id == patient_id)
+            .filter(Appointment.start_time >= past)
+            .filter(Appointment.start_time < future)
+            .order_by(Appointment.start_time)
+            .all()
+        )
+        if not appts:
+            return f"No appointments found for patient {patient_id} in the next {days_ahead} days or past 30 days."
+        result = []
+        for a in appts:
+            provider = db.get(Provider, a.provider_id)
+            appt_type = db.get(AppointmentType, a.appointment_type_id)
+            result.append({
+                "appointment_id": a.id,
+                "date": a.start_time.strftime("%A, %B %d, %Y at %I:%M %p"),
+                "provider": f"Dr. {provider.first_name} {provider.last_name}" if provider else "Unknown",
+                "type": appt_type.name if appt_type else "Unknown",
+                "status": a.status,
+                "notes": a.notes or "",
+            })
+        return json.dumps(result, indent=2)
+    finally:
+        db.close()
+
+
+@tool
 def get_appointments_for_date(date: str) -> str:
     """Return all booked appointments for a specific date.
 
@@ -715,6 +759,7 @@ TOOLS = [
     add_patient,
     list_all_patients,
     list_patients_by_provider,
+    get_patient_appointments,
     get_appointments_for_date,
     check_available_slots,
     book_appointment,
@@ -769,6 +814,7 @@ _SYSTEM_PROMPT = (
     "- Add a new patient using add_patient\n"
     "- List all patients in the practice using list_all_patients\n"
     "- List patients seen by a specific provider using list_patients_by_provider\n"
+    "- Look up a patient's upcoming/recent appointments using get_patient_appointments — use this when asked if a specific patient has an appointment\n"
     "- Look up all booked appointments for a day using get_appointments_for_date\n"
     "- Find open appointment slots for patients\n"
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
@@ -782,6 +828,10 @@ _SYSTEM_PROMPT = (
     "If the user asks for a date beyond the 28-day slot window, do NOT call check_available_slots. "
     "Instead, immediately tell the user: 'I can only see availability for the next 28 days (through <end date>). "
     "That date is outside my scheduling window.'\n\n"
+    "IMPORTANT — patient appointment lookups:\n"
+    "When asked whether a patient has an appointment (e.g. 'does X have an appointment this week'), "
+    "search for the patient first, then call get_patient_appointments with their patient_id. "
+    "NEVER call get_appointments_for_date repeatedly for each day — that wastes iterations.\n\n"
     "IMPORTANT — booking flow:\n"
     "1. When you present a numbered list of slots, mentally keep the slot_id for each number.\n"
     "2. When the user picks a slot by number (e.g. '#3' or 'option 2'), DO NOT call check_available_slots again.\n"
