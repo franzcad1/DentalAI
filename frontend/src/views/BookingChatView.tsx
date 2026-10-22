@@ -79,6 +79,38 @@ function ToolCallPanel({ calls }: { calls: AgentToolCall[] }) {
   )
 }
 
+function LoadingIndicator({ startedAt }: { startedAt: Date }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+
+  const label =
+    elapsed < 5  ? 'Thinking…' :
+    elapsed < 15 ? `Still thinking… (${elapsed}s)` :
+    elapsed < 30 ? `This is taking longer than usual… (${elapsed}s)` :
+                   `Waiting on the AI provider… (${elapsed}s)`
+
+  return (
+    <div className="flex items-center gap-2 text-slate-400">
+      <div className="flex gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500 animate-bounce"
+            style={{ animationDelay: `${i * 150}ms` }}
+          />
+        ))}
+      </div>
+      <span className={`text-xs transition-colors ${elapsed >= 15 ? 'text-yellow-400' : ''}`}>{label}</span>
+    </div>
+  )
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === 'user'
 
@@ -105,18 +137,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           )}
         >
           {msg.isLoading ? (
-            <div className="flex items-center gap-2 text-slate-400">
-              <div className="flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500 animate-bounce"
-                    style={{ animationDelay: `${i * 150}ms` }}
-                  />
-                ))}
-              </div>
-              <span className="text-xs">Thinking…</span>
-            </div>
+            <LoadingIndicator startedAt={msg.timestamp} />)
           ) : msg.error ? (
             <span className="text-red-400">{msg.error}</span>
           ) : (
