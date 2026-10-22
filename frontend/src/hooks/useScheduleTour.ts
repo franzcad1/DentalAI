@@ -29,12 +29,12 @@ export function startScheduleTour() {
         },
       },
       {
-        element: '[data-tour="grid"]',
+        element: '[data-tour="new-appt-btn"]',
         popover: {
-          title: '✋ Drag to reschedule',
-          description: 'Click and drag any appointment block to move it to a different time or a different provider column.',
-          side: 'top',
-          align: 'center',
+          title: '📋 New Appointment button',
+          description: 'Use this button at the top to book a new appointment from scratch.',
+          side: 'bottom',
+          align: 'end',
         },
       },
       {
@@ -47,12 +47,12 @@ export function startScheduleTour() {
         },
       },
       {
-        element: '[data-tour="new-appt-btn"]',
+        element: '[data-tour="grid"]',
         popover: {
-          title: '📋 New Appointment button',
-          description: 'Use this button at the top to book a new appointment from scratch.',
-          side: 'bottom',
-          align: 'end',
+          title: '✋ Drag to reschedule',
+          description: 'Click and drag any appointment block to move it to a different time or provider column. Give it a try — the tour will close when you start dragging.',
+          side: 'top',
+          align: 'center',
         },
       },
     ],
