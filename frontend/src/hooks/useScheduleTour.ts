@@ -10,7 +10,7 @@ export function destroyTourIfActive() {
   }
 }
 
-export function startScheduleTour() {
+export function startScheduleTour(onCloseNewAppt?: () => void) {
   destroyTourIfActive()
   const driverObj = driver({
     showProgress: true,
@@ -23,7 +23,7 @@ export function startScheduleTour() {
         element: '[data-tour="grid"]',
         popover: {
           title: '📅 Calendar grid',
-          description: 'Each column is a provider. Appointments are stacked in their time slots. Scroll to see the full day. Click any empty slot to open a pre-filled booking form.',
+          description: 'Each column is a provider. Appointments are stacked in their time slots. Scroll to see the full day.',
           side: 'top',
           align: 'center',
         },
@@ -35,6 +35,10 @@ export function startScheduleTour() {
           description: 'Use this button at the top to book a new appointment from scratch.',
           side: 'bottom',
           align: 'end',
+          onNextClick: () => {
+            onCloseNewAppt?.()
+            driverObj.moveNext()
+          },
         },
       },
       {

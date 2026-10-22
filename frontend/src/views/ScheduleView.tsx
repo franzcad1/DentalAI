@@ -948,7 +948,7 @@ export function ScheduleView() {
           </button>
           <span className="tour-glow-wrap hidden sm:inline-flex">
             <button
-              onClick={() => startScheduleTour()}
+              onClick={() => startScheduleTour(() => { setShowNewAppt(false); setNewApptPrefill({}) })}
               className="flex items-center gap-1.5 rounded-lg bg-surface-card px-3 py-2 text-xs text-slate-400 hover:bg-surface-raised hover:text-slate-200 transition-colors"
               title="Take a tour"
             >
@@ -1198,7 +1198,7 @@ export function ScheduleView() {
               onClick={() => {
                 setShowTourPrompt(false)
                 try { localStorage.setItem(TOUR_KEY, '1') } catch {}
-                setTimeout(startScheduleTour, 100)
+                setTimeout(() => startScheduleTour(() => { setShowNewAppt(false); setNewApptPrefill({}) }), 100)
               }}
               className="flex-1 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent/90 transition-colors"
             >
