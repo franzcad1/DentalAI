@@ -7,7 +7,8 @@
  *   Notes icon click   — edit notes inline
  */
 import { useState, useEffect, useRef, useLayoutEffect } from 'react'
-import { startScheduleTour } from '@/hooks/useScheduleTour'
+import { startScheduleTour, destroyActiveTour } from '@/hooks/useScheduleTour'
+import { WELCOME_DISMISSED_KEY } from '@/components/WelcomeModal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Clock, RefreshCw, User, Stethoscope,
@@ -754,6 +755,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         if (!el) return
                         const rect = el.getBoundingClientRect()
                         const grabOffsetY = (e.clientY - rect.top) + el.scrollTop - top
+                        destroyActiveTour()
                         setBlockDrag({
                           apptId: appt.id,
                           origStartISO: appt.start_time,
@@ -791,6 +793,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                         onMouseDown={e => {
                           e.stopPropagation()
                           e.preventDefault()
+                          destroyActiveTour()
                           setDrag({
                             apptId: appt.id,
                             startY: e.clientY,
@@ -873,8 +876,22 @@ export function ScheduleView() {
   useEffect(() => {
     if (!gridReady) return
     try { if (localStorage.getItem(TOUR_KEY)) return } catch {}
-    const t = setTimeout(() => setShowTourPrompt(true), 400)
-    return () => clearTimeout(t)
+
+    // Wait until the welcome modal has been dismissed before showing the prompt
+    const check = () => {
+      try { return !!localStorage.getItem(WELCOME_DISMISSED_KEY) } catch { return true }
+    }
+    if (check()) {
+      const t = setTimeout(() => setShowTourPrompt(true), 400)
+      return () => clearTimeout(t)
+    }
+    const poll = setInterval(() => {
+      if (check()) {
+        clearInterval(poll)
+        setTimeout(() => setShowTourPrompt(true), 400)
+      }
+    }, 300)
+    return () => clearInterval(poll)
   }, [gridReady])
 
   const patientMap  = new Map((patientQuery.data?.data.items ?? []).map(p => [p.id, p]))

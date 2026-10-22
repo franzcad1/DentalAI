@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 
 const STARTUP_KEY = 'dentalai_startup_id'
+export const WELCOME_DISMISSED_KEY = 'dentalai_welcome_dismissed'
 
 export function WelcomeModal() {
   const [open, setOpen] = useState(false)
@@ -31,6 +32,7 @@ export function WelcomeModal() {
     api.getHealth().then(({ startup_id }) => {
       try { localStorage.setItem(STARTUP_KEY, startup_id) } catch {}
     }).catch(() => {})
+    try { localStorage.setItem(WELCOME_DISMISSED_KEY, '1') } catch {}
     setOpen(false)
   }
 

@@ -1,7 +1,14 @@
-import { driver } from 'driver.js'
+import { driver, Driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
 
+let activeDriver: Driver | null = null
+
+export function destroyActiveTour() {
+  if (activeDriver) { activeDriver.destroy(); activeDriver = null }
+}
+
 export function startScheduleTour() {
+  destroyActiveTour()
   const driverObj = driver({
     showProgress: true,
     animate: true,
@@ -47,8 +54,10 @@ export function startScheduleTour() {
       },
     ],
     onDestroyStarted: () => {
+      activeDriver = null
       driverObj.destroy()
     },
   })
+  activeDriver = driverObj
   driverObj.drive()
 }
