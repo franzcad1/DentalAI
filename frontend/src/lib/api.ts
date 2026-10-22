@@ -199,7 +199,7 @@ export const api = {
   // Update appointment (status, notes, times)
   updateAppointment: (
     id: number,
-    patch: { status?: AppointmentStatus; notes?: string; start_time?: string; end_time?: string }
+    patch: { status?: AppointmentStatus; notes?: string; start_time?: string; end_time?: string; provider_id?: number }
   ) =>
     request<NexHealthResponse<Appointment>>(`/api/v1/appointments/${id}`, {
       method: 'PATCH',
@@ -242,4 +242,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message, session_id: sessionId }),
     }),
+
+  agentStatus: (sessionId: string) =>
+    request<{ retrying: boolean; retry_in?: number; remaining?: number }>(
+      `/api/v1/agent/status/${sessionId}`
+    ),
 }

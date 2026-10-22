@@ -86,6 +86,8 @@ import inspect
 import json
 import logging
 import os
+import re
+import time
 from datetime import datetime, date, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -110,6 +112,34 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 6  # safety cap: prevents infinite tool-call loops
+
+# ---------------------------------------------------------------------------
+# Per-session retry status — surfaced to the frontend via GET /agent/status
+# ---------------------------------------------------------------------------
+
+# { session_id: {"retry_in": int, "set_at": float} | None }
+_retry_status: Dict[str, Optional[Dict[str, Any]]] = {}
+
+
+def set_retry_status(session_id: str, retry_in: float) -> None:
+    _retry_status[session_id] = {"retry_in": int(retry_in), "set_at": time.time()}
+
+
+def clear_retry_status(session_id: str) -> None:
+    _retry_status.pop(session_id, None)
+
+
+def get_retry_status(session_id: str) -> Optional[Dict[str, Any]]:
+    """Return remaining retry seconds, or None if not retrying."""
+    entry = _retry_status.get(session_id)
+    if not entry:
+        return None
+    elapsed = time.time() - entry["set_at"]
+    remaining = entry["retry_in"] - elapsed
+    if remaining <= 0:
+        _retry_status.pop(session_id, None)
+        return None
+    return {"retry_in": entry["retry_in"], "remaining": int(remaining) + 1}
 
 # ---------------------------------------------------------------------------
 # In-memory session store  {session_id: [message_dict, ...]}
@@ -245,6 +275,27 @@ def book_appointment(
                 f"which is after the 5:00 PM closing time. "
                 f"Please choose an earlier slot."
             )
+
+        # Check for overlapping appointments with the same provider
+        overlap = (
+            db.query(Appointment)
+            .filter(
+                Appointment.provider_id == slot.provider_id,
+                Appointment.status.notin_(["cancelled"]),
+                Appointment.start_time < end_time,
+                Appointment.end_time > slot.start_time,
+            )
+            .first()
+        )
+        if overlap:
+            prov = db.get(Provider, slot.provider_id)
+            prov_name = f"Dr. {prov.last_name}" if prov else f"Provider #{slot.provider_id}"
+            return (
+                f"Error: {prov_name} already has an appointment from "
+                f"{overlap.start_time.strftime('%I:%M %p')} to {overlap.end_time.strftime('%I:%M %p')} "
+                f"that overlaps with this time slot. Please choose a different slot."
+            )
+
         appt = Appointment(
             patient_id=patient_id,
             provider_id=slot.provider_id,
@@ -851,35 +902,220 @@ def cancel_appointment(appointment_id: int) -> str:
 
 
 @tool
-def update_appointment_status(appointment_id: int, status: str) -> str:
-    """Update the status of an existing appointment.
+def modify_appointment(
+    appointment_id: int,
+    new_provider_id: Optional[int] = None,
+    new_slot_id: Optional[int] = None,
+    new_appointment_type_id: Optional[int] = None,
+    new_patient_id: Optional[int] = None,
+    new_status: Optional[str] = None,
+    new_notes: Optional[str] = None,
+) -> str:
+    """Modify any aspect of an existing appointment in one call.
 
-    Valid statuses: confirmed, completed, pending, no_show, cancelled.
+    Can change provider, time slot, appointment type, patient, status, and/or notes.
+    All parameters are optional — pass only the ones you want to change.
+
+    When changing the provider (new_provider_id) without a new_slot_id, the tool
+    tries to keep the same date and time.  If that conflicts, it returns an error
+    with the provider's name so you can call check_available_slots and try again
+    with a new_slot_id.
+
+    When changing the time (new_slot_id), the tool enforces the 5 PM closing time
+    and checks for overlapping appointments.
 
     Args:
-        appointment_id: The ID of the appointment to update.
-        status:         The new status string.
+        appointment_id:         The ID of the appointment to modify.
+        new_provider_id:        New provider (optional).
+        new_slot_id:            New AvailableSlot ID for a time/provider change (optional).
+        new_appointment_type_id: New appointment type ID (optional).
+        new_patient_id:         New patient ID (optional).
+        new_status:             New status — confirmed, completed, pending, no_show, cancelled (optional).
+        new_notes:              New notes string (optional).
 
     Returns:
-        Confirmation string, or an error if appointment not found or status invalid.
+        A summary of every field that changed, or an error message.
     """
-    valid = {"confirmed", "completed", "pending", "no_show", "cancelled"}
-    if status not in valid:
-        return f"Error: '{status}' is not a valid status. Choose from: {', '.join(sorted(valid))}."
+    valid_statuses = {"confirmed", "completed", "pending", "no_show", "cancelled"}
+    if new_status and new_status not in valid_statuses:
+        return f"Error: '{new_status}' is not a valid status. Choose from: {', '.join(sorted(valid_statuses))}."
+
     db = SessionLocal()
     try:
         appt = db.get(Appointment, appointment_id)
         if not appt:
             return f"Error: appointment {appointment_id} not found."
-        old_status = appt.status
-        appt.status = status
+
+        changes: list[str] = []
+
+        # ── Time / slot change ──────────────────────────────────────────────
+        if new_slot_id is not None:
+            new_slot = db.get(AvailableSlot, new_slot_id)
+            if not new_slot:
+                return f"Error: slot {new_slot_id} does not exist."
+            if new_slot.is_booked:
+                return f"Error: slot {new_slot_id} is already booked. Please choose a different slot."
+
+            effective_type_id = new_appointment_type_id or appt.appointment_type_id
+            appt_type = db.get(AppointmentType, effective_type_id)
+            duration = appt_type.duration_minutes if appt_type else 30
+            new_end = new_slot.start_time + timedelta(minutes=duration)
+            cutoff = new_slot.start_time.replace(hour=17, minute=0, second=0, microsecond=0)
+            if new_end > cutoff:
+                return (
+                    f"Error: this appointment would end at {new_end.strftime('%I:%M %p')}, "
+                    f"after the 5:00 PM closing time. Please choose an earlier slot."
+                )
+
+            effective_provider_id = new_provider_id or appt.provider_id
+            overlap = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.id != appointment_id,
+                    Appointment.provider_id == effective_provider_id,
+                    Appointment.status.notin_(["cancelled"]),
+                    Appointment.start_time < new_end,
+                    Appointment.end_time > new_slot.start_time,
+                )
+                .first()
+            )
+            if overlap:
+                prov = db.get(Provider, effective_provider_id)
+                prov_name = f"Dr. {prov.last_name}" if prov else f"Provider #{effective_provider_id}"
+                return (
+                    f"Error: {prov_name} already has an appointment from "
+                    f"{overlap.start_time.strftime('%I:%M %p')} to {overlap.end_time.strftime('%I:%M %p')} "
+                    f"that overlaps with the requested slot. Please choose a different time."
+                )
+
+            # Free the old slot
+            old_slot = (
+                db.query(AvailableSlot)
+                .filter(
+                    AvailableSlot.provider_id == appt.provider_id,
+                    AvailableSlot.start_time == appt.start_time,
+                )
+                .first()
+            )
+            if old_slot:
+                old_slot.is_booked = False
+
+            changes.append(f"  Time    : {appt.start_time.strftime('%A, %B %d at %I:%M %p')} → {new_slot.start_time.strftime('%A, %B %d at %I:%M %p')}")
+            appt.start_time = new_slot.start_time
+            appt.end_time = new_end
+            appt.location_id = new_slot.location_id
+            if new_provider_id is None:
+                appt.provider_id = new_slot.provider_id
+            new_slot.is_booked = True
+
+        # ── Provider change (no slot change) ────────────────────────────────
+        if new_provider_id is not None and new_slot_id is None:
+            new_prov = db.get(Provider, new_provider_id)
+            if not new_prov:
+                return f"Error: provider {new_provider_id} not found."
+
+            # Check for conflicts at the existing time
+            effective_end = appt.end_time
+            overlap = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.id != appointment_id,
+                    Appointment.provider_id == new_provider_id,
+                    Appointment.status.notin_(["cancelled"]),
+                    Appointment.start_time < effective_end,
+                    Appointment.end_time > appt.start_time,
+                )
+                .first()
+            )
+            if overlap:
+                new_prov_name = f"Dr. {new_prov.first_name} {new_prov.last_name}"
+                return (
+                    f"Error: {new_prov_name} already has an appointment at "
+                    f"{overlap.start_time.strftime('%I:%M %p')}–{overlap.end_time.strftime('%I:%M %p')} "
+                    f"that conflicts with the existing time. "
+                    f"Call check_available_slots(provider_id={new_provider_id}) to find a free slot, "
+                    f"then call modify_appointment again with new_provider_id and new_slot_id."
+                )
+
+            old_prov = db.get(Provider, appt.provider_id)
+            old_prov_name = f"Dr. {old_prov.last_name}" if old_prov else f"Provider #{appt.provider_id}"
+            # Free old slot, mark new slot if one exists
+            old_slot = (
+                db.query(AvailableSlot)
+                .filter(AvailableSlot.provider_id == appt.provider_id, AvailableSlot.start_time == appt.start_time)
+                .first()
+            )
+            if old_slot:
+                old_slot.is_booked = False
+            new_slot_match = (
+                db.query(AvailableSlot)
+                .filter(AvailableSlot.provider_id == new_provider_id, AvailableSlot.start_time == appt.start_time)
+                .first()
+            )
+            if new_slot_match:
+                new_slot_match.is_booked = True
+                appt.location_id = new_slot_match.location_id
+
+            changes.append(f"  Provider: {old_prov_name} → Dr. {new_prov.first_name} {new_prov.last_name}")
+            appt.provider_id = new_provider_id
+
+        elif new_provider_id is not None and new_slot_id is not None:
+            # Provider supplied alongside a slot — apply it
+            old_prov = db.get(Provider, appt.provider_id)
+            new_prov = db.get(Provider, new_provider_id)
+            old_name = f"Dr. {old_prov.last_name}" if old_prov else f"#{appt.provider_id}"
+            new_name = f"Dr. {new_prov.first_name} {new_prov.last_name}" if new_prov else f"#{new_provider_id}"
+            changes.append(f"  Provider: {old_name} → {new_name}")
+            appt.provider_id = new_provider_id
+
+        # ── Appointment type ─────────────────────────────────────────────────
+        if new_appointment_type_id is not None and new_appointment_type_id != appt.appointment_type_id:
+            old_type = db.get(AppointmentType, appt.appointment_type_id)
+            new_type = db.get(AppointmentType, new_appointment_type_id)
+            if not new_type:
+                return f"Error: appointment type {new_appointment_type_id} not found."
+            changes.append(f"  Type    : {old_type.name if old_type else appt.appointment_type_id} → {new_type.name}")
+            appt.appointment_type_id = new_appointment_type_id
+            # Recompute end_time if no slot was swapped
+            if new_slot_id is None:
+                new_end = appt.start_time + timedelta(minutes=new_type.duration_minutes)
+                cutoff = appt.start_time.replace(hour=17, minute=0, second=0, microsecond=0)
+                if new_end > cutoff:
+                    return (
+                        f"Error: changing to '{new_type.name}' ({new_type.duration_minutes} min) would end at "
+                        f"{new_end.strftime('%I:%M %p')}, after the 5:00 PM closing time."
+                    )
+                appt.end_time = new_end
+
+        # ── Patient ──────────────────────────────────────────────────────────
+        if new_patient_id is not None and new_patient_id != appt.patient_id:
+            new_patient = db.get(Patient, new_patient_id)
+            if not new_patient:
+                return f"Error: patient {new_patient_id} not found."
+            old_patient = db.get(Patient, appt.patient_id)
+            old_pt_name = f"{old_patient.first_name} {old_patient.last_name}" if old_patient else f"#{appt.patient_id}"
+            changes.append(f"  Patient : {old_pt_name} → {new_patient.first_name} {new_patient.last_name}")
+            appt.patient_id = new_patient_id
+
+        # ── Status ───────────────────────────────────────────────────────────
+        if new_status is not None and new_status != appt.status:
+            changes.append(f"  Status  : {appt.status} → {new_status}")
+            appt.status = new_status
+
+        # ── Notes ────────────────────────────────────────────────────────────
+        if new_notes is not None:
+            changes.append(f"  Notes   : updated")
+            appt.notes = new_notes or None
+
+        if not changes:
+            return "No changes were made — all supplied values match the current appointment."
+
         db.commit()
         patient = db.get(Patient, appt.patient_id)
         patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
         return (
-            f"Appointment {appointment_id} for {patient_name} updated.\n"
-            f"  Status: {old_status} → {status}\n"
-            f"  Time  : {appt.start_time.strftime('%A, %B %d at %I:%M %p')}"
+            f"Appointment {appointment_id} for {patient_name} updated:\n"
+            + "\n".join(changes)
         )
     finally:
         db.close()
@@ -921,6 +1157,27 @@ def reschedule_appointment(appointment_id: int, new_slot_id: int) -> str:
                 f"after the 5:00 PM closing time."
             )
 
+        # Check for overlapping appointments with the same provider (excluding self)
+        overlap = (
+            db.query(Appointment)
+            .filter(
+                Appointment.id != appointment_id,
+                Appointment.provider_id == new_slot.provider_id,
+                Appointment.status.notin_(["cancelled"]),
+                Appointment.start_time < new_end,
+                Appointment.end_time > new_slot.start_time,
+            )
+            .first()
+        )
+        if overlap:
+            prov = db.get(Provider, new_slot.provider_id)
+            prov_name = f"Dr. {prov.last_name}" if prov else f"Provider #{new_slot.provider_id}"
+            return (
+                f"Error: {prov_name} already has an appointment from "
+                f"{overlap.start_time.strftime('%I:%M %p')} to {overlap.end_time.strftime('%I:%M %p')} "
+                f"that overlaps with the new slot. Please choose a different slot."
+            )
+
         old_time = appt.start_time
 
         # Free the old slot if one exists
@@ -958,6 +1215,102 @@ def reschedule_appointment(appointment_id: int, new_slot_id: int) -> str:
         db.close()
 
 
+@tool
+def change_appointment_provider(appointment_id: int, new_provider_id: int) -> str:
+    """Change the provider for an existing appointment, keeping the same date and time if possible.
+
+    Tries to find an available slot for the new provider at the exact same start time.
+    If no slot exists at that time, returns an error listing the new provider's available slots
+    so the agent can ask the user to pick one.
+
+    Args:
+        appointment_id: The ID of the appointment to update.
+        new_provider_id: The ID of the provider to reassign the appointment to.
+
+    Returns:
+        Confirmation string, or an error message with available alternatives.
+    """
+    db = SessionLocal()
+    try:
+        appt = db.get(Appointment, appointment_id)
+        if not appt:
+            return f"Error: appointment {appointment_id} not found."
+
+        new_prov = db.get(Provider, new_provider_id)
+        if not new_prov:
+            return f"Error: provider {new_provider_id} not found."
+
+        appt_type = db.get(AppointmentType, appt.appointment_type_id)
+        duration = appt_type.duration_minutes if appt_type else 30
+        orig_start = appt.start_time
+        orig_end = appt.end_time
+
+        # Check if the new provider has a free slot at the same time
+        conflict = (
+            db.query(Appointment)
+            .filter(
+                Appointment.id != appointment_id,
+                Appointment.provider_id == new_provider_id,
+                Appointment.status.notin_(["cancelled"]),
+                Appointment.start_time < orig_end,
+                Appointment.end_time > orig_start,
+            )
+            .first()
+        )
+
+        if not conflict:
+            # Reassign directly — keep same times
+            old_prov = db.get(Provider, appt.provider_id)
+            old_prov_name = f"Dr. {old_prov.last_name}" if old_prov else f"Provider #{appt.provider_id}"
+
+            # Free old slot if one exists
+            old_slot = (
+                db.query(AvailableSlot)
+                .filter(
+                    AvailableSlot.provider_id == appt.provider_id,
+                    AvailableSlot.start_time == appt.start_time,
+                )
+                .first()
+            )
+            if old_slot:
+                old_slot.is_booked = False
+
+            appt.provider_id = new_provider_id
+            # Update location to match new provider's default location if available
+            new_slot_same_time = (
+                db.query(AvailableSlot)
+                .filter(
+                    AvailableSlot.provider_id == new_provider_id,
+                    AvailableSlot.start_time == orig_start,
+                )
+                .first()
+            )
+            if new_slot_same_time:
+                new_slot_same_time.is_booked = True
+                appt.location_id = new_slot_same_time.location_id
+
+            db.commit()
+            patient = db.get(Patient, appt.patient_id)
+            patient_name = f"{patient.first_name} {patient.last_name}" if patient else f"Patient #{appt.patient_id}"
+            new_prov_name = f"Dr. {new_prov.first_name} {new_prov.last_name}"
+            return (
+                f"Provider changed successfully.\n"
+                f"  Patient : {patient_name}\n"
+                f"  Provider: {old_prov_name} → {new_prov_name}\n"
+                f"  Time    : {orig_start.strftime('%A, %B %d at %I:%M %p')} – {orig_end.strftime('%I:%M %p')} (unchanged)"
+            )
+        else:
+            new_prov_name = f"Dr. {new_prov.first_name} {new_prov.last_name}"
+            return (
+                f"Error: {new_prov_name} already has an appointment at that time "
+                f"({conflict.start_time.strftime('%I:%M %p')}–{conflict.end_time.strftime('%I:%M %p')}). "
+                f"Use check_available_slots with provider_id={new_provider_id} to find a free slot, "
+                f"then use reschedule_appointment to move the appointment to that slot."
+            )
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — maps name → callable and builds OpenAI function schemas
 # ---------------------------------------------------------------------------
@@ -973,8 +1326,7 @@ TOOLS = [
     book_appointment,
     delete_appointment,
     cancel_appointment,
-    update_appointment_status,
-    reschedule_appointment,
+    modify_appointment,
     get_patient_context,
     get_recall_queue,
     draft_recall_message,
@@ -1032,8 +1384,14 @@ _SYSTEM_PROMPT = (
     "- Book appointments when asked (confirm patient name and time before finalising)\n"
     "- Permanently delete an appointment using delete_appointment(appointment_id) — use when the user says 'delete', 'remove', or 'get rid of'\n"
     "- Cancel an appointment (keeps the record) using cancel_appointment(appointment_id) — use when the user says 'cancel'\n"
-    "- Change an appointment's status using update_appointment_status(appointment_id, status)\n"
-    "- Move an appointment to a new slot using reschedule_appointment(appointment_id, new_slot_id)\n"
+    "- Modify any aspect of an appointment using modify_appointment(appointment_id, ...) — "
+    "use this for ALL appointment edits: changing provider, time/slot, type, patient, status, or notes. "
+    "Pass only the fields you want to change. It enforces office hours and checks for overlaps automatically.\n"
+    "  • Change provider only: modify_appointment(id, new_provider_id=X) — keeps same time if no conflict\n"
+    "  • Reschedule: modify_appointment(id, new_slot_id=X) — use check_available_slots first to find the slot\n"
+    "  • Change type: modify_appointment(id, new_appointment_type_id=X)\n"
+    "  • Change status: modify_appointment(id, new_status='confirmed'|'completed'|'pending'|'no_show'|'cancelled')\n"
+    "  • Multiple changes at once: modify_appointment(id, new_provider_id=X, new_slot_id=Y, new_status='confirmed')\n"
     "- Retrieve patient history and recall status\n"
     "- Identify overdue patients who need outreach\n"
     "- Draft personalised recall messages\n\n"
@@ -1139,14 +1497,54 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     tool_call_log: List[Dict[str, Any]] = []
 
+    def _parse_retry_wait(exc_str: str) -> float:
+        """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
+        m = re.search(r'try again in (?:(\d+)m)?([\d.]+)s', exc_str, re.IGNORECASE)
+        if m:
+            minutes = float(m.group(1) or 0)
+            seconds = float(m.group(2) or 0)
+            return minutes * 60 + seconds
+        return 30.0
+
+    def _chat_create_with_retry(msgs: List[ChatCompletionMessageParam]) -> Any:
+        """Call Groq with manual 429 retry so we can surface wait time to the frontend."""
+        import groq as _groq_mod
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = client.chat.completions.create(
+                    model="openai/gpt-oss-20b",
+                    messages=msgs,
+                    tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
+                    tool_choice="auto",
+                    temperature=0,
+                )
+                clear_retry_status(session_id)
+                return result
+            except _groq_mod.RateLimitError as exc:
+                wait = _parse_retry_wait(str(exc))
+                logger.info("[AGENT] Groq 429 — wait=%.0fs (session=%s)", wait, session_id)
+                # Daily/large limits (>5 min) — don't retry, surface immediately
+                if wait > 300:
+                    clear_retry_status(session_id)
+                    mins = int(wait // 60)
+                    secs = int(wait % 60)
+                    raise RuntimeError(
+                        f"The AI provider's daily token limit has been reached. "
+                        f"Please try again in {mins}m {secs}s."
+                    ) from exc
+                set_retry_status(session_id, wait)
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                else:
+                    clear_retry_status(session_id)
+                    raise
+            except Exception:
+                clear_retry_status(session_id)
+                raise
+
     for iteration in range(MAX_ITERATIONS):
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=messages,
-            tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
-            tool_choice="auto",
-            temperature=0,
-        )
+        response = _chat_create_with_retry(messages)
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":

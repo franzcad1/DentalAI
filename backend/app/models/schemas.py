@@ -139,6 +139,7 @@ class AppointmentUpdate(BaseModel):
     notes: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    provider_id: Optional[int] = None
 
 
 class AppointmentRead(AppointmentBase):

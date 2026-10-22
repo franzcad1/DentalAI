@@ -438,10 +438,49 @@ interface AppointmentGridProps {
 }
 
 function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClickAppt }: AppointmentGridProps) {
+  const qc = useQueryClient()
   const bodyRef = useRef<HTMLDivElement>(null)
   const [slotH, setSlotH] = useState(14)
 
-  // Measure available height and compute slot height to fill without scrolling
+  // Drag-resize state
+  const [drag, setDrag] = useState<{
+    apptId: number
+    startY: number
+    origHeight: number
+    origEndISO: string
+    startISO: string
+    deltaSlots: number
+  } | null>(null)
+
+  // Drag-move state
+  const [blockDrag, setBlockDrag] = useState<{
+    apptId: number
+    origStartISO: string
+    origEndISO: string
+    origProviderId: number
+    grabOffsetY: number
+    previewProviderId: number
+    previewStartISO: string
+    previewEndISO: string
+    hasMoved: boolean
+    isConflict: boolean
+  } | null>(null)
+
+  const didDragRef = useRef(false)
+
+  const resizeMutation = useMutation({
+    mutationFn: ({ id, end_time }: { id: number; end_time: string }) =>
+      api.updateAppointment(id, { end_time }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
+  })
+
+  const moveMutation = useMutation({
+    mutationFn: ({ id, start_time, end_time, provider_id }: { id: number; start_time: string; end_time: string; provider_id: number }) =>
+      api.updateAppointment(id, { start_time, end_time, provider_id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['appointments'] }),
+  })
+
+  // Measure available height
   useLayoutEffect(() => {
     const el = bodyRef.current
     if (!el) return
@@ -451,6 +490,122 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // Global mouse handlers for drag
+  useEffect(() => {
+    if (!drag) return
+
+    const onMove = (e: MouseEvent) => {
+      const rawDelta = e.clientY - drag.startY
+      const deltaSlots = Math.round(rawDelta / slotH)
+      // Clamp: minimum 1 slot, maximum up to 5pm
+      const start = new Date(drag.startISO)
+      const origSlots = Math.round(drag.origHeight / slotH)
+      const maxSlots = Math.floor((GRID_END_H * 60 - (start.getHours() * 60 + start.getMinutes())) / 10)
+      const newSlots = Math.min(maxSlots, Math.max(1, origSlots + deltaSlots))
+      setDrag(d => d ? { ...d, deltaSlots: newSlots - origSlots } : null)
+    }
+
+    const onUp = () => {
+      if (!drag) return
+      const start = new Date(drag.startISO)
+      const origSlots = Math.round(drag.origHeight / slotH)
+      const maxSlots = Math.floor((GRID_END_H * 60 - (start.getHours() * 60 + start.getMinutes())) / 10)
+      const newSlots = Math.min(maxSlots, Math.max(1, origSlots + drag.deltaSlots))
+      const newEnd = new Date(start.getTime() + newSlots * 10 * 60_000)
+      const newEndISO = `${newEnd.getFullYear()}-${String(newEnd.getMonth()+1).padStart(2,'0')}-${String(newEnd.getDate()).padStart(2,'0')}T${String(newEnd.getHours()).padStart(2,'0')}:${String(newEnd.getMinutes()).padStart(2,'0')}:00`
+      if (newEndISO !== drag.origEndISO) {
+        resizeMutation.mutate({ id: drag.apptId, end_time: newEndISO })
+      }
+      didDragRef.current = true
+      setDrag(null)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [drag, slotH])
+
+  // Global mouse handlers for block move drag
+  useEffect(() => {
+    if (!blockDrag) return
+
+    const onMove = (e: MouseEvent) => {
+      const el = bodyRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const GUTTER = 56
+      const colWidth = (rect.width - GUTTER) / providers.length
+      const relX = e.clientX - rect.left - GUTTER
+      const colIdx = Math.max(0, Math.min(providers.length - 1, Math.floor(relX / colWidth)))
+      const newProviderId = providers[colIdx].id
+
+      const relY = (e.clientY - rect.top) + el.scrollTop - blockDrag.grabOffsetY
+      const rawSlot = Math.round(relY / slotH)
+      const durationMs = new Date(blockDrag.origEndISO).getTime() - new Date(blockDrag.origStartISO).getTime()
+      const durationSlots = Math.round(durationMs / 60_000 / 10)
+      const maxStartSlot = SLOTS_TOTAL - durationSlots
+      const startSlot = Math.max(0, Math.min(maxStartSlot, rawSlot))
+
+      const origStart = new Date(blockDrag.origStartISO)
+      const newStart = new Date(origStart)
+      newStart.setHours(GRID_START_H, 0, 0, 0)
+      newStart.setTime(newStart.getTime() + startSlot * 10 * 60_000)
+      const newEnd = new Date(newStart.getTime() + durationMs)
+
+      const toISO = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:00`
+
+      const newStartMs = newStart.getTime()
+      const newEndMs   = newEnd.getTime()
+      const hasConflict = appointments.some(a =>
+        a.id !== blockDrag.apptId &&
+        a.provider_id === newProviderId &&
+        a.status !== 'cancelled' &&
+        new Date(a.start_time).getTime() < newEndMs &&
+        new Date(a.end_time).getTime()   > newStartMs
+      )
+
+      setBlockDrag(bd => bd ? {
+        ...bd,
+        previewProviderId: newProviderId,
+        previewStartISO: toISO(newStart),
+        previewEndISO: toISO(newEnd),
+        hasMoved: true,
+        isConflict: hasConflict,
+      } : null)
+    }
+
+    const onUp = () => {
+      if (!blockDrag || !blockDrag.hasMoved) { setBlockDrag(null); return }
+      if (!blockDrag.isConflict) {
+        const changed =
+          blockDrag.previewStartISO !== blockDrag.origStartISO ||
+          blockDrag.previewEndISO   !== blockDrag.origEndISO   ||
+          blockDrag.previewProviderId !== blockDrag.origProviderId
+        if (changed) {
+          moveMutation.mutate({
+            id: blockDrag.apptId,
+            start_time: blockDrag.previewStartISO,
+            end_time: blockDrag.previewEndISO,
+            provider_id: blockDrag.previewProviderId,
+          })
+        }
+      }
+      didDragRef.current = true
+      setBlockDrag(null)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [blockDrag, slotH, providers, appointments])
 
   const gridHeight = SLOTS_TOTAL * slotH
 
@@ -472,7 +627,7 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
   }
 
   return (
-    <div className="flex flex-col rounded-xl border border-surface-border overflow-hidden flex-1 min-h-0">
+    <div className={`flex flex-col rounded-xl border border-surface-border overflow-hidden flex-1 min-h-0 ${(drag || blockDrag) ? 'select-none' : ''}`}>
       {/* Provider header row */}
       <div className="flex border-b border-surface-border bg-surface-card flex-shrink-0">
         <div className="w-14 flex-shrink-0 border-r border-surface-border" />
@@ -521,29 +676,102 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
 
               {/* Appointment blocks */}
               {provAppts.map(appt => {
+                const isResizing = drag?.apptId === appt.id
+                const isMoving = blockDrag?.apptId === appt.id
+
                 const top    = slotTop(appt.start_time, slotH)
-                const height = slotHeight(appt.start_time, appt.end_time, slotH)
+                const baseH  = slotHeight(appt.start_time, appt.end_time, slotH)
+                const height = isResizing
+                  ? Math.max(slotH, baseH + drag.deltaSlots * slotH)
+                  : baseH
                 const patient  = patientMap.get(appt.patient_id)
                 const typeName = typeMap.get(appt.appointment_type_id) ?? ''
                 const colorCls = GRID_COLORS[appt.status]
 
                 return (
-                  <div
-                    key={appt.id}
-                    onClick={() => onClickAppt(appt)}
-                    title={`${patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`} · ${typeName} · ${formatTime(appt.start_time)}`}
-                    className={`absolute inset-x-1 rounded border cursor-pointer overflow-hidden px-1.5 py-0.5 ${colorCls} hover:brightness-125 transition-all z-10`}
-                    style={{ top: top + 1, height: height - 2 }}
-                  >
-                    <p className="text-[11px] font-semibold leading-tight truncate">
-                      {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
-                    </p>
-                    {height > slotH * 1.5 && (
-                      <p className="text-[10px] leading-tight opacity-80 truncate">{typeName}</p>
+                  <div key={appt.id}>
+                    {/* Ghost preview block shown in THIS column when moving here */}
+                    {isMoving && blockDrag.previewProviderId === provider.id && (
+                      <div
+                        className={`absolute inset-x-1 rounded border z-30 pointer-events-none ${
+                          blockDrag.isConflict
+                            ? 'bg-red-500/30 border-red-400/70'
+                            : `${colorCls} opacity-60`
+                        }`}
+                        style={{
+                          top: slotTop(blockDrag.previewStartISO, slotH) + 1,
+                          height: slotHeight(blockDrag.previewStartISO, blockDrag.previewEndISO, slotH) - 2,
+                        }}
+                      />
                     )}
-                    {height > slotH * 3 && (
-                      <p className="text-[10px] leading-tight opacity-60">{formatTime(appt.start_time)}</p>
-                    )}
+
+                    {/* Original block */}
+                    <div
+                      onClick={e => {
+                        e.stopPropagation()
+                        if (didDragRef.current) { didDragRef.current = false; return }
+                        onClickAppt(appt)
+                      }}
+                      onMouseDown={e => {
+                        // Only start move drag on left button, not on resize handle
+                        if (e.button !== 0) return
+                        e.stopPropagation()
+                        e.preventDefault()
+                        const el = bodyRef.current
+                        if (!el) return
+                        const rect = el.getBoundingClientRect()
+                        const grabOffsetY = (e.clientY - rect.top) + el.scrollTop - top
+                        setBlockDrag({
+                          apptId: appt.id,
+                          origStartISO: appt.start_time,
+                          origEndISO: appt.end_time,
+                          origProviderId: appt.provider_id,
+                          grabOffsetY,
+                          previewProviderId: appt.provider_id,
+                          previewStartISO: appt.start_time,
+                          previewEndISO: appt.end_time,
+                          hasMoved: false,
+                          isConflict: false,
+                        })
+                      }}
+                      title={`${patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`} · ${typeName} · ${formatTime(appt.start_time)}`}
+                      className={`absolute inset-x-1 rounded border overflow-hidden px-1.5 py-0.5 ${colorCls} ${
+                        isMoving ? 'opacity-30 z-10' :
+                        isResizing ? 'opacity-90 shadow-lg z-20' :
+                        'cursor-grab hover:brightness-125 z-10'
+                      } transition-shadow select-none`}
+                      style={{ top: top + 1, height: height - 2 }}
+                    >
+                      <p className="text-[11px] font-semibold leading-tight truncate">
+                        {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
+                      </p>
+                      {height > slotH * 1.5 && (
+                        <p className="text-[10px] leading-tight opacity-80 truncate">{typeName}</p>
+                      )}
+                      {height > slotH * 3 && (
+                        <p className="text-[10px] leading-tight opacity-60">{formatTime(appt.start_time)}</p>
+                      )}
+
+                      {/* Resize handle */}
+                      <div
+                        title="Drag to resize"
+                        onMouseDown={e => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          setDrag({
+                            apptId: appt.id,
+                            startY: e.clientY,
+                            origHeight: baseH,
+                            origEndISO: appt.end_time,
+                            startISO: appt.start_time,
+                            deltaSlots: 0,
+                          })
+                        }}
+                        className="absolute bottom-0 left-0 right-0 h-3 cursor-s-resize flex items-end justify-center pb-0.5 opacity-0 hover:opacity-100 transition-opacity"
+                      >
+                        <div className="w-6 h-1 rounded-full bg-current opacity-50" />
+                      </div>
+                    </div>
                   </div>
                 )
               })}

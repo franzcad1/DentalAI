@@ -8,6 +8,8 @@ intentionally thin so the agent logic can be tested independently of FastAPI.
 
 import logging
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, status
 
 from app.models.schemas import AgentChatRequest, AgentChatResponse, AgentToolCall
@@ -32,11 +34,19 @@ def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
 
     try:
         result = run_agent(message=body.message, session_id=body.session_id)
-    except (RuntimeError, EnvironmentError, OSError) as exc:
+    except (EnvironmentError, OSError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         )
+    except RuntimeError as exc:
+        err_str = str(exc)
+        http_status = (
+            status.HTTP_429_TOO_MANY_REQUESTS
+            if "rate limit" in err_str.lower() or "token limit" in err_str.lower()
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        raise HTTPException(status_code=http_status, detail=err_str)
     except Exception as exc:
         err_str = str(exc)
         logger.error("[AGENT] Unexpected error during chat: %s", exc, exc_info=True)
@@ -68,3 +78,17 @@ def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
         tool_calls=tool_calls,
         session_id=body.session_id,
     )
+
+
+@router.get("/status/{session_id}", tags=["agent"])
+def agent_status(session_id: str) -> dict:
+    """Return the current retry status for a session, if any.
+
+    Returns { retrying: true, retry_in: int, remaining: int } while waiting,
+    or { retrying: false } when idle.
+    """
+    from app.agent.agent import get_retry_status
+    entry = get_retry_status(session_id)
+    if entry:
+        return {"retrying": True, "retry_in": entry["retry_in"], "remaining": entry["remaining"]}
+    return {"retrying": False}

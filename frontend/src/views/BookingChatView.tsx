@@ -20,6 +20,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface RetryStatus {
+  retrying: boolean
+  retry_in?: number
+  remaining?: number
+}
+
 interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -28,6 +34,7 @@ interface Message {
   isLoading?: boolean
   error?: string
   timestamp: Date
+  retryStatus?: RetryStatus
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -107,7 +114,7 @@ function RateLimitBanner() {
   )
 }
 
-function LoadingIndicator({ startedAt }: { startedAt: Date }) {
+function LoadingIndicator({ startedAt, retryStatus }: { startedAt: Date; retryStatus?: RetryStatus }) {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
@@ -124,17 +131,24 @@ function LoadingIndicator({ startedAt }: { startedAt: Date }) {
                    `Waiting on the AI provider… (${elapsed}s)`
 
   return (
-    <div className="flex items-center gap-2 text-slate-400">
-      <div className="flex gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500 animate-bounce"
-            style={{ animationDelay: `${i * 150}ms` }}
-          />
-        ))}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 text-slate-400">
+        <div className="flex gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500 animate-bounce"
+              style={{ animationDelay: `${i * 150}ms` }}
+            />
+          ))}
+        </div>
+        <span className={`text-xs transition-colors ${elapsed >= 15 ? 'text-yellow-400' : ''}`}>{label}</span>
       </div>
-      <span className={`text-xs transition-colors ${elapsed >= 15 ? 'text-yellow-400' : ''}`}>{label}</span>
+      {retryStatus?.retrying && retryStatus.remaining != null && (
+        <p className="text-[11px] text-orange-400/90 leading-tight">
+          Rate limited — retrying in {retryStatus.remaining}s
+        </p>
+      )}
     </div>
   )
 }
@@ -165,7 +179,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           )}
         >
           {msg.isLoading ? (
-            <LoadingIndicator startedAt={msg.timestamp} />
+            <LoadingIndicator startedAt={msg.timestamp} retryStatus={msg.retryStatus} />
           ) : msg.error ? (
             <span className="text-red-400">{msg.error}</span>
           ) : (
@@ -374,8 +388,21 @@ export function BookingChatView() {
     setInput('')
     setIsLoading(true)
 
+    // Poll for retry status while the agent is working
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await api.agentStatus(sessionId)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === loadingMsg.id ? { ...m, retryStatus: status } : m
+          )
+        )
+      } catch { /* ignore poll errors */ }
+    }, 1000)
+
     try {
       const result = await api.agentChat(trimmed, sessionId)
+      clearInterval(pollInterval)
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingMsg.id
@@ -384,17 +411,29 @@ export function BookingChatView() {
                 content: result.response,
                 toolCalls: result.tool_calls,
                 isLoading: false,
+                retryStatus: undefined,
               }
             : m
         )
       )
     } catch (err) {
+      clearInterval(pollInterval)
       const msg = err instanceof Error ? err.message : String(err)
+      // Extract the detail message from the backend error body if present
+      let detail = msg
+      try {
+        const jsonStart = msg.indexOf('{')
+        if (jsonStart !== -1) {
+          const parsed = JSON.parse(msg.slice(jsonStart))
+          if (parsed?.detail) detail = parsed.detail
+        }
+      } catch { /* ignore */ }
+
       const errorMsg =
         msg.includes('503')
           ? 'Agent unavailable — the backend is not reachable.'
           : msg.includes('429') || msg.includes('rate limit') || msg.includes('too large')
-          ? 'The AI provider hit a rate limit. Please wait a moment and try again.'
+          ? detail
           : msg
 
       setMessages((prev) =>
