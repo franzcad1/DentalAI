@@ -97,10 +97,14 @@ function NewAppointmentDialog({
     mutationFn: () => {
       const type = appointmentTypes.find(t => t.id === Number(form.appointment_type_id))
       const startISO = `${form.date}T${form.time}:00`
-      const start = new Date(startISO)
-      const end = new Date(start.getTime() + (type?.duration_minutes ?? 30) * 60_000)
-      const closing = new Date(`${form.date}T17:00:00`)
-      if (end > closing) {
+      const durationMins = type?.duration_minutes ?? 30
+      const [sh, sm] = form.time.split(':').map(Number)
+      const endTotalMins = sh * 60 + sm + durationMins
+      const endH = Math.floor(endTotalMins / 60).toString().padStart(2, '0')
+      const endM = (endTotalMins % 60).toString().padStart(2, '0')
+      const endISO = `${form.date}T${endH}:${endM}:00`
+      if (endTotalMins > 17 * 60) {
+        const end = new Date(`${form.date}T${endH}:${endM}:00`)
         const endStr = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
         throw new Error(`This appointment would end at ${endStr}, after the 5:00 PM closing time. Choose an earlier start time.`)
       }
@@ -110,7 +114,7 @@ function NewAppointmentDialog({
         location_id: Number(form.location_id),
         appointment_type_id: Number(form.appointment_type_id),
         start_time: startISO,
-        end_time: end.toISOString().slice(0, 19),
+        end_time: endISO,
         status: 'confirmed',
         notes: form.notes || undefined,
       })
@@ -260,6 +264,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
     notes: appt?.notes ?? '',
   })
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Reset form when appt changes
   useEffect(() => {
@@ -273,26 +278,36 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
     })
   }, [appt])
 
+  const qcEdit = useQueryClient()
+
   const mutation = useMutation({
     mutationFn: () => {
       if (!appt) return Promise.reject()
       const type = appointmentTypes.find(t => t.id === Number(form.appointment_type_id))
       const startISO = `${form.date}T${form.time}:00`
-      const start = new Date(startISO)
-      const end = new Date(start.getTime() + (type?.duration_minutes ?? 30) * 60_000)
-      const closing = new Date(`${form.date}T17:00:00`)
-      if (end > closing) {
-        const endStr = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-        throw new Error(`This appointment would end at ${endStr}, after the 5:00 PM closing time.`)
+      const durationMins = type?.duration_minutes ?? 30
+      const [sh, sm] = form.time.split(':').map(Number)
+      const endTotalMins = sh * 60 + sm + durationMins
+      const endH = Math.floor(endTotalMins / 60).toString().padStart(2, '0')
+      const endM = (endTotalMins % 60).toString().padStart(2, '0')
+      const endISO = `${form.date}T${endH}:${endM}:00`
+      if (endTotalMins > 17 * 60) {
+        throw new Error(`This appointment would end after 5:00 PM. Choose an earlier start time.`)
       }
       return api.updateAppointment(appt.id, {
         status: form.status,
         notes: form.notes || undefined,
         start_time: startISO,
-        end_time: end.toISOString().slice(0, 19),
+        end_time: endISO,
       })
     },
     onSuccess: () => { onSaved(); onClose(); setError('') },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteAppointment(appt!.id),
+    onSuccess: () => { qcEdit.invalidateQueries({ queryKey: ['appointments'] }); onClose() },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -356,12 +371,27 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
 
           {error && <p className="text-xs text-red-400">{error}</p>}
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Saving…' : 'Save Changes'}
-            </Button>
-          </div>
+          {confirmDelete ? (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 space-y-2">
+              <p className="text-xs text-red-400">Delete this appointment? This cannot be undone.</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="destructive" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+                  {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between pt-1">
+              <Button size="sm" variant="destructive" onClick={() => setConfirmDelete(true)}>Delete</Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+                  {mutation.isPending ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -817,14 +847,21 @@ function AppointmentGrid({ appointments, providers, patientMap, typeMap, onClick
                       } transition-shadow select-none`}
                       style={{ top: top + 1, height: height - 2 }}
                     >
-                      <p className="text-[11px] font-semibold leading-tight truncate">
-                        {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
-                      </p>
-                      {height > slotH * 1.5 && (
-                        <p className="text-[10px] leading-tight opacity-80 truncate">{typeName}</p>
-                      )}
-                      {height > slotH * 3 && (
-                        <p className="text-[10px] leading-tight opacity-60">{formatTime(appt.start_time)}</p>
+                      {height <= slotH * 2 ? (
+                        <p className="text-[10px] font-semibold leading-tight truncate">
+                          {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
+                          {typeName ? <span className="opacity-70"> · {typeName}</span> : null}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-[11px] font-semibold leading-tight truncate">
+                            {patient ? `${patient.first_name} ${patient.last_name}` : `#${appt.patient_id}`}
+                          </p>
+                          <p className="text-[10px] leading-tight opacity-80 truncate">{typeName}</p>
+                          {height > slotH * 3 && (
+                            <p className="text-[10px] leading-tight opacity-60">{formatTime(appt.start_time)}</p>
+                          )}
+                        </>
                       )}
 
                       {/* Resize handle */}

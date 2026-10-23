@@ -112,6 +112,15 @@ async function request<T>(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
+    if (res.status === 409) {
+      try {
+        const json = JSON.parse(text)
+        throw new Error(json.detail ?? 'This time slot conflicts with an existing appointment.')
+      } catch (e) {
+        if (e instanceof Error && e.message !== text) throw e
+      }
+      throw new Error('This time slot conflicts with an existing appointment.')
+    }
     throw new Error(`${res.status}: ${text}`)
   }
   return res.json() as Promise<T>
@@ -207,6 +216,12 @@ export const api = {
     request<NexHealthResponse<Appointment>>(`/api/v1/appointments/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+
+  // Delete appointment
+  deleteAppointment: (id: number) =>
+    fetch(`${BASE_URL}/api/v1/appointments/${id}`, { method: 'DELETE' }).then(res => {
+      if (!res.ok) throw new Error(`${res.status}`)
     }),
 
   // Update recall status

@@ -47,6 +47,23 @@ def list_appointments(
 
 @router.post("", response_model=NexHealthResponse[AppointmentRead], status_code=status.HTTP_201_CREATED)
 def create_appointment(db: DB, body: AppointmentCreate) -> NexHealthResponse[AppointmentRead]:
+    conflict = (
+        db.query(Appointment)
+        .filter(
+            Appointment.provider_id == body.provider_id,
+            Appointment.status.notin_(["cancelled", "no_show"]),
+            Appointment.start_time < body.end_time,
+            Appointment.end_time > body.start_time,
+        )
+        .first()
+    )
+    if conflict:
+        fmt = lambda dt: dt.strftime("%I:%M %p").lstrip("0") if hasattr(dt, "strftime") else str(dt)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Provider already has an appointment from {fmt(conflict.start_time)} to {fmt(conflict.end_time)}",
+        )
+
     appt = Appointment(**body.model_dump())
     db.add(appt)
     db.commit()
@@ -67,6 +84,15 @@ def create_appointment(db: DB, body: AppointmentCreate) -> NexHealthResponse[App
     )
 
     return NexHealthResponse(code=201, description="Created", data=appt)
+
+
+@router.delete("/{appointment_id}", status_code=204)
+def delete_appointment(db: DB, appointment_id: int) -> None:
+    appt = db.get(Appointment, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
+    db.delete(appt)
+    db.commit()
 
 
 @router.patch("/{appointment_id}", response_model=NexHealthResponse[AppointmentRead])
