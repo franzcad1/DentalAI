@@ -261,10 +261,12 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
     appointment_type_id: String(appt?.appointment_type_id ?? ''),
     date: appt ? appt.start_time.slice(0, 10) : '',
     time: appt ? appt.start_time.slice(11, 16) : '',
+    end_time: appt ? appt.end_time.slice(11, 16) : '',
     notes: appt?.notes ?? '',
   })
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [statusOpen, setStatusOpen] = useState(false)
 
   // Reset form when appt changes
   useEffect(() => {
@@ -274,6 +276,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
       appointment_type_id: String(appt.appointment_type_id),
       date: appt.start_time.slice(0, 10),
       time: appt.start_time.slice(11, 16),
+      end_time: appt.end_time.slice(11, 16),
       notes: appt.notes ?? '',
     })
   }, [appt])
@@ -283,16 +286,21 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
   const mutation = useMutation({
     mutationFn: () => {
       if (!appt) return Promise.reject()
-      const type = appointmentTypes.find(t => t.id === Number(form.appointment_type_id))
       const startISO = `${form.date}T${form.time}:00`
-      const durationMins = type?.duration_minutes ?? 30
-      const [sh, sm] = form.time.split(':').map(Number)
-      const endTotalMins = sh * 60 + sm + durationMins
-      const endH = Math.floor(endTotalMins / 60).toString().padStart(2, '0')
-      const endM = (endTotalMins % 60).toString().padStart(2, '0')
-      const endISO = `${form.date}T${endH}:${endM}:00`
-      if (endTotalMins > 17 * 60) {
-        throw new Error(`This appointment would end after 5:00 PM. Choose an earlier start time.`)
+      const origTime = appt.start_time.slice(11, 16)
+      const startChanged = form.time !== origTime
+      let endISO: string
+      if (startChanged) {
+        // start moved — shift end by the same delta
+        const [oh, om] = origTime.split(':').map(Number)
+        const [sh, sm] = form.time.split(':').map(Number)
+        const [eh, em] = form.end_time.split(':').map(Number)
+        const deltaMins = (sh * 60 + sm) - (oh * 60 + om)
+        const newEndMins = eh * 60 + em + deltaMins
+        if (newEndMins > 17 * 60) throw new Error('This appointment would end after 5:00 PM. Choose an earlier start time.')
+        endISO = `${form.date}T${Math.floor(newEndMins / 60).toString().padStart(2, '0')}:${(newEndMins % 60).toString().padStart(2, '0')}:00`
+      } else {
+        endISO = `${form.date}T${form.end_time}:00`
       }
       return api.updateAppointment(appt.id, {
         status: form.status,
@@ -325,12 +333,30 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
 
         <div className="space-y-3 mt-1">
           {/* Status */}
-          <div>
+          <div className="relative">
             <label className="mb-1 block text-xs text-slate-400">Status</label>
-            <select value={form.status} onChange={e => set('status', e.target.value)}
-              className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
-              {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-            </select>
+            <button
+              type="button"
+              onClick={() => setStatusOpen(o => !o)}
+              className="w-full flex items-center justify-between rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              <span className={statusColors(form.status).text}>{statusLabel(form.status)}</span>
+              <svg className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </button>
+            {statusOpen && (
+              <div className="absolute z-50 mt-1 w-full rounded-md border border-surface-border bg-surface-card shadow-lg overflow-hidden">
+                {STATUSES.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => { set('status', s); setStatusOpen(false) }}
+                    className={`w-full px-3 py-2 text-sm text-left transition-colors hover:bg-surface-raised ${statusColors(s).text} ${form.status === s ? 'bg-surface-raised' : ''}`}
+                  >
+                    {statusLabel(s)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Provider */}
@@ -338,7 +364,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
             <label className="mb-1 block text-xs text-slate-400">Provider</label>
             <select value={form.provider_id} onChange={e => set('provider_id', e.target.value)}
               className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
-              {providers.map(p => <option key={p.id} value={p.id}>Dr. {p.first_name} {p.last_name}</option>)}
+              {providers.map(p => <option key={p.id} value={String(p.id)}>Dr. {p.first_name} {p.last_name}</option>)}
             </select>
           </div>
 
@@ -347,7 +373,7 @@ function EditAppointmentDialog({ appt, onClose, providers, appointmentTypes, onS
             <label className="mb-1 block text-xs text-slate-400">Appointment Type</label>
             <select value={form.appointment_type_id} onChange={e => set('appointment_type_id', e.target.value)}
               className="w-full rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-accent">
-              {appointmentTypes.map(t => <option key={t.id} value={t.id}>{t.name} ({t.duration_minutes} min)</option>)}
+              {appointmentTypes.map(t => <option key={t.id} value={String(t.id)}>{t.name} ({t.duration_minutes} min)</option>)}
             </select>
           </div>
 
