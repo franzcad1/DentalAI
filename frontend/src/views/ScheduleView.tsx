@@ -1213,7 +1213,38 @@ export function ScheduleView() {
           )}
 
           {isLoading && (
-            <div className="flex-1 animate-pulse rounded-xl bg-surface-card border border-surface-border" />
+            <div className="flex-1 rounded-xl border border-surface-border overflow-hidden flex flex-col">
+              {/* Column headers skeleton */}
+              <div className="flex border-b border-surface-border bg-surface-card">
+                <div className="w-14 flex-shrink-0" />
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="flex-1 border-l border-surface-border px-3 py-3">
+                    <div className="h-3 w-20 animate-pulse rounded bg-surface-raised mb-1.5" />
+                    <div className="h-2.5 w-14 animate-pulse rounded bg-surface-raised opacity-60" />
+                  </div>
+                ))}
+              </div>
+              {/* Time rows skeleton */}
+              <div className="flex flex-1 overflow-hidden">
+                <div className="w-14 flex-shrink-0 border-r border-surface-border">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="h-16 border-b border-surface-border flex items-start pt-1 px-2">
+                      <div className="h-2 w-8 animate-pulse rounded bg-surface-raised opacity-50" />
+                    </div>
+                  ))}
+                </div>
+                {[...Array(3)].map((_, col) => (
+                  <div key={col} className="flex-1 border-l border-surface-border relative">
+                    {[...Array(6)].map((_, i) => (
+                      <div key={i} className="h-16 border-b border-surface-border" />
+                    ))}
+                    {col === 0 && <div className="absolute inset-x-1 top-4 h-14 animate-pulse rounded bg-blue-500/10 border border-blue-500/20" />}
+                    {col === 1 && <div className="absolute inset-x-1 top-20 h-10 animate-pulse rounded bg-blue-500/10 border border-blue-500/20" />}
+                    {col === 2 && <div className="absolute inset-x-1 top-8 h-16 animate-pulse rounded bg-blue-500/10 border border-blue-500/20" />}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {error && (
