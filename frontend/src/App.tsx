@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { Layout } from '@/components/Layout'
 import { WelcomeModal } from '@/components/WelcomeModal'
+import { BackendGate } from '@/components/BackendGate'
 import { ScheduleView } from '@/views/ScheduleView'
 import { RecallQueueView } from '@/views/RecallQueueView'
 import { BookingChatView } from '@/views/BookingChatView'
@@ -22,6 +23,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <BackendGate>
       <WelcomeModal />
       <Routes>
         <Route element={<Layout />}>
@@ -33,6 +35,7 @@ export default function App() {
           <Route path="/about" element={<AboutView />} />
         </Route>
       </Routes>
+      </BackendGate>
     </QueryClientProvider>
   )
 }
