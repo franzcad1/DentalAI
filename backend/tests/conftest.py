@@ -81,7 +81,8 @@ def agent_db():
     finally:
         db.close()
 
-    with patch("app.agent.agent.SessionLocal", TestSession):
+    with patch("app.agent.agent.SessionLocal", TestSession), \
+         patch("app.events.bus.SessionLocal", TestSession):
         yield TestSession
 
     Base.metadata.drop_all(bind=engine)
