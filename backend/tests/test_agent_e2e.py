@@ -1,13 +1,13 @@
 """End-to-end agent tests.
 
-These tests call run_agent() directly and require OPENAI_API_KEY to be set
+These tests call run_agent() directly and require GROQ_API_KEY to be set
 in the environment or in backend/.env.
 
 Run with:
     cd backend
     py -m pytest tests/test_agent_e2e.py -v -s
 
-If OPENAI_API_KEY is not set, tests are skipped automatically.
+If GROQ_API_KEY is not set, tests are skipped automatically.
 """
 
 import json
@@ -17,8 +17,8 @@ import pytest
 
 # Skip the entire module if no API key is available
 pytestmark = pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "").startswith("sk-test"),
-    reason="OPENAI_API_KEY not set — skipping live agent tests",
+    not os.getenv("GROQ_API_KEY"),
+    reason="GROQ_API_KEY not set — skipping live agent tests",
 )
 
 
