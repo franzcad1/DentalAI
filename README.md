@@ -117,15 +117,13 @@ npm run dev                        # starts on port 5173
 
 ## Authentication
 
-All endpoints except `GET /health` require a `Bearer` token in the `Authorization` header.
+Auth is scaffolded (`auth.py` generates an HS256 JWT printed at startup) but not enforced yet — the Bearer header is currently ignored by all API routes. Enforcement is planned for a later milestone.
 
-**Getting the dev token:** The token is printed to the backend console on startup:
+**Dev token (for future use):** printed to the backend console on startup:
 ```
 INFO | app.main | Test Bearer token (valid 24 h):
 INFO | app.main |   eyJhbGci...
 ```
-
-Paste it into the frontend's token gate UI, or set `VITE_DEV_TOKEN=<token>` in `frontend/.env` to skip the gate entirely.
 
 ---
 
