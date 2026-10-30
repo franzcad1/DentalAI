@@ -1,17 +1,15 @@
 """HTTP middleware for DentalAI.
 
-RequestIdMiddleware assigns a unique trace ID to every incoming request.
-The ID flows into every log line via RequestIdFilter (see logging_config.py),
-so all log output for one HTTP call shares the same request_id — making it
-possible to reconstruct exactly what happened for a given request even under
-concurrent load.
-
-The ID is either taken from the incoming X-Request-ID header (so upstream
-proxies or the frontend can set their own) or generated as a UUID if absent.
-It is echoed back in the response header so clients can correlate their
-own logs with backend logs.
+RequestIdMiddleware does two things per request:
+1. Assigns a trace ID (from X-Request-ID header or a fresh UUID) and stores it
+   in request_id_var so every log line for this request carries the same ID.
+2. Logs a single request-completed line with method, path, status code, and
+   wall-clock duration — the most useful line for debugging and the one worth
+   showing in an interview.
 """
 
+import logging
+import time
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -20,14 +18,27 @@ from starlette.responses import Response
 
 from app.logging_config import request_id_var
 
+logger = logging.getLogger(__name__)
+
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         token = request_id_var.set(request_id)
+        start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
+            duration_ms = round((time.perf_counter() - start) * 1000)
+            logger.info(
+                "request completed",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code if "response" in dir() else 500,
+                    "duration_ms": duration_ms,
+                },
+            )
             request_id_var.reset(token)
         response.headers["X-Request-ID"] = request_id
         return response

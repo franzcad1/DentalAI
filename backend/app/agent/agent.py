@@ -1596,7 +1596,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 tool_call_log.append(
                     {"tool": tool_name, "input": tool_input, "output": str(tool_output)}
                 )
-                logger.info("[AGENT] tool_call=%s input=%s", tool_name, tool_input)
+                logger.info("[AGENT] tool_call=%s input_keys=%s", tool_name, list(tool_input.keys()))
 
                 # Feed the tool result back as a "tool" role message
                 messages.append(

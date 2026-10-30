@@ -48,11 +48,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     fix_overlapping_appointments()
     start_scheduler()
     token = create_access_token()
-    logger.info("=" * 60)
-    logger.info("DentalAI dev server ready")
-    logger.info("Test Bearer token (valid 24 h):")
-    logger.info("  %s", token)
-    logger.info("=" * 60)
+    logger.info("DentalAI dev server ready — Bearer token issued (valid 24 h)")
+    # Print the token directly to stderr so it reaches the developer's terminal
+    # without flowing into any log aggregator or structured log pipeline.
+    import sys
+    print(f"\n  Bearer token (valid 24 h):\n  {token}\n", file=sys.stderr, flush=True)
     yield
     # ── Shutdown ─────────────────────────────────────────────────────────
     stop_scheduler()
