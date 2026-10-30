@@ -30,10 +30,9 @@ def upgrade() -> None:
         sa.Column("phone", sa.String(30), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("email"),
     )
     op.create_index("ix_patients_id", "patients", ["id"])
-    op.create_index("ix_patients_email", "patients", ["email"])
+    op.create_index("ix_patients_email", "patients", ["email"], unique=True)
 
     op.create_table(
         "providers",
