@@ -96,11 +96,16 @@ def _redact_exc(text: str) -> str:
     Adds email, quoted-date, and phone patterns on top of the standard key-value
     pass because database adapters embed raw parameter tuples without field-name
     context, and log.error("fail: %s", exc) exposes the exception message directly.
+
+    Order matters: _PHONE_BARE runs before _PHI_QS so that a space-formatted phone
+    in a query-string value (phone=(555) 123-4567) is replaced whole before _PHI_QS
+    can stop at the space and leave the trailing digits exposed.
     """
-    text = _redact(text)
+    text = _PHI_KV.sub(r'\1\3***\3', text)
     text = _EMAIL_BARE.sub('***', text)
     text = _DATE_QUOTED.sub(r'\1***\1', text)
     text = _PHONE_BARE.sub('***', text)
+    text = _PHI_QS.sub(r'\1***', text)
     return text
 
 

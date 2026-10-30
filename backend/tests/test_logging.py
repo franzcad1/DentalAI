@@ -186,6 +186,15 @@ def test_bare_phone_hyphen_format_redacted():
     assert "555-123-4567" not in raw
 
 
+def test_phone_in_query_string_space_format():
+    # Regression: _PHI_QS stops at the space, leaving trailing digits if it runs
+    # before _PHONE_BARE. The fix runs _PHONE_BARE first so the full number is
+    # replaced before the query-string pass sees it.
+    record = _capture_log("phone=(555) 123-4567 next")
+    raw = json.dumps(record)
+    assert "123-4567" not in raw
+
+
 def test_exc_info_phone_redacted():
     try:
         raise ValueError("parameters: ('Jane', '1990-01-01', 'jane@x.com', '(555) 999-8888')")
