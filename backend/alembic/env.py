@@ -21,17 +21,20 @@ if config.config_file_name is not None:
 from app.db.session import Base  # noqa: E402
 import app.models.orm  # noqa: E402, F401
 
+# Load backend/.env so a plain `alembic upgrade head` picks up DATABASE_URL
+# without needing it set in the shell first.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+except ImportError:
+    pass  # python-dotenv not installed — env var must be set explicitly
+
 # Override the URL from the environment so CI / production can point at a
 # different database without editing alembic.ini.
 db_url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
 config.set_main_option("sqlalchemy.url", db_url)
 
 target_metadata = Base.metadata
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
 
 
 def run_migrations_offline() -> None:
@@ -52,6 +55,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,   # required for SQLite ALTER TABLE support
+        compare_type=True,      # detect column type changes in autogenerate
     )
 
     with context.begin_transaction():
@@ -73,7 +78,10 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,   # required for SQLite ALTER TABLE support
+            compare_type=True,      # detect column type changes in autogenerate
         )
 
         with context.begin_transaction():
