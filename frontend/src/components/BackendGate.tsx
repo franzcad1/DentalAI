@@ -14,11 +14,17 @@ export function BackendGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [elapsed, setElapsed] = useState(0)
+  const [showAdBlockHint, setShowAdBlockHint] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => setElapsed(s => s + 1), 1000)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const id = setTimeout(() => setShowAdBlockHint(true), 60_000)
+    return () => clearTimeout(id)
   }, [])
 
   useEffect(() => {
@@ -92,6 +98,11 @@ export function BackendGate({ children }: { children: React.ReactNode }) {
                 The AI agent will be ready once it's online.
               </p>
             </div>
+            {showAdBlockHint && (
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Taking longer than expected? An ad blocker or privacy extension may be blocking the backend. Try disabling it or opening in a private window.
+              </p>
+            )}
           </div>
 
           {/* Footer */}
