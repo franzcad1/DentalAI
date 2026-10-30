@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { Stethoscope, Calendar, Bell, MessageSquare, Users } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -9,6 +9,8 @@ const FEATURES = [
   { icon: Users, label: 'Patients', desc: 'Patient directory & records' },
   { icon: MessageSquare, label: 'AI Chat', desc: 'Book, search & draft via AI' },
 ]
+
+export const BackendReadyContext = React.createContext(false)
 
 export function BackendGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
@@ -50,7 +52,11 @@ export function BackendGate({ children }: { children: React.ReactNode }) {
     }
   }, [attempt])
 
-  if (ready) return <>{children}</>
+  if (ready) return (
+    <BackendReadyContext.Provider value={true}>
+      {children}
+    </BackendReadyContext.Provider>
+  )
 
   return (
     <>

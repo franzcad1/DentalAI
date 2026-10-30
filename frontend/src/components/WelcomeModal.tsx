@@ -1,13 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { Stethoscope, Calendar, Bell, MessageSquare, Users, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { BackendReadyContext } from '@/components/BackendGate'
 
 const STARTUP_KEY = 'dentalai_startup_id'
 export const WELCOME_DISMISSED_KEY = 'dentalai_welcome_dismissed'
 
 export function WelcomeModal() {
+  const backendReady = useContext(BackendReadyContext)
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
 
@@ -38,7 +40,7 @@ export function WelcomeModal() {
     setOpen(false)
   }
 
-  if (!open) return null
+  if (!open || !backendReady) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
