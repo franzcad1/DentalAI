@@ -169,6 +169,15 @@ export function AboutView() {
             >
               <Linkedin className="h-5 w-5" />
             </a>
+            <a
+              href="https://franzcadiente.com"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors border border-surface-border rounded-lg px-3 py-1.5"
+              title="Portfolio"
+            >
+              Portfolio
+            </a>
           </div>
         </div>
       </section>
