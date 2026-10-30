@@ -46,9 +46,13 @@ def emit_event(event_type: str, payload: Dict[str, Any]) -> Event:
         db.commit()
         db.refresh(event)
 
-        # Human-readable console line: [EVENT] recall.due → patient_id=12 | due=2024-01-15
-        parts = " | ".join(f"{k}={v}" for k, v in payload.items())
-        logger.info("[EVENT] %s → %s", event_type, parts)
+        # Log event type and non-PHI ID fields only — never contact details.
+        _SAFE_KEYS = {"patient_id", "appointment_id", "provider_id", "recall_id",
+                      "event_id", "appointment_type", "booked_via", "due", "recall_type"}
+        safe_parts = " | ".join(
+            f"{k}={v}" for k, v in payload.items() if k in _SAFE_KEYS
+        )
+        logger.info("[EVENT] %s event_id=%s %s", event_type, event.id, safe_parts)
 
         return event
     except Exception:
