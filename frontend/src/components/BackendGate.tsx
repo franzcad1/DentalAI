@@ -147,7 +147,7 @@ export function BackendGate({ children }: { children: React.ReactNode }) {
                   onClick={() => { setMinimized(true); navigate('/about') }}
                   className="text-xs px-3 py-1.5 rounded-lg border border-surface-border bg-surface-raised text-slate-300 hover:bg-surface-border hover:text-slate-100 transition-colors"
                 >
-                  While you wait →
+                  While you wait
                 </button>
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <svg className="h-3.5 w-3.5 animate-spin text-yellow-400" fill="none" viewBox="0 0 24 24">
