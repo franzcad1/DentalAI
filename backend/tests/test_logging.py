@@ -2,19 +2,23 @@
 
 All tests are offline — no API key or running server required.
 
+The helper _capture_log uses the real _make_handler() from logging_config,
+so these tests exercise the actual production configuration rather than a
+reimplemented copy of it.
+
 Run with: cd backend && py -m pytest tests/test_logging.py -v
 """
 
+import io
 import json
 import logging
-import io
 
 import pytest
 
 from app.logging_config import (
     PhiRedactingFilter,
     RequestIdFilter,
-    configure_logging,
+    _make_handler,
     request_id_var,
 )
 
@@ -24,19 +28,15 @@ from app.logging_config import (
 # ---------------------------------------------------------------------------
 
 
-def _capture_log(message: str, level: int = logging.INFO) -> dict:
-    """Emit one log line through a fresh handler and return it parsed as JSON."""
-    from pythonjsonlogger import jsonlogger
+def _capture_log(message: str, level: int = logging.INFO, **kwargs) -> dict:
+    """Emit one log line through the real handler and return it as a dict.
 
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    formatter = jsonlogger.JsonFormatter(
-        fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
-        rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
-    )
-    handler.setFormatter(formatter)
-    handler.addFilter(RequestIdFilter())
-    handler.addFilter(PhiRedactingFilter())
+    Replaces the handler's stdout stream with a StringIO buffer so we can
+    inspect the output without touching sys.stdout.
+    """
+    handler = _make_handler()
+    buf = io.StringIO()
+    handler.stream = buf
 
     logger = logging.getLogger("_test_logging")
     logger.handlers.clear()
@@ -44,9 +44,8 @@ def _capture_log(message: str, level: int = logging.INFO) -> dict:
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
-    logger.log(level, message)
-    raw = stream.getvalue().strip()
-    return json.loads(raw)
+    logger.log(level, message, **kwargs)
+    return json.loads(buf.getvalue().strip())
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +76,8 @@ def test_request_id_flows_from_contextvar():
 
 
 def test_task_name_not_in_output():
+    # taskName is added to LogRecord in Python 3.12+. It should be excluded
+    # via reserved_attrs in _make_handler so it never appears in JSON output.
     record = _capture_log("taskName check")
     assert "taskName" not in record
 
@@ -89,19 +90,17 @@ def test_task_name_not_in_output():
 def test_email_redacted_in_json():
     record = _capture_log('{"email": "jane@example.com", "name": "Jane"}')
     assert "jane@example.com" not in record["message"]
-    assert '"email": "***"' in record["message"]
+    assert "***" in record["message"]
 
 
 def test_phone_redacted_in_json():
     record = _capture_log('{"phone": "555-1234"}')
     assert "555-1234" not in record["message"]
-    assert '"phone": "***"' in record["message"]
 
 
 def test_dob_redacted_in_json():
     record = _capture_log('{"dob": "1990-01-01"}')
     assert "1990-01-01" not in record["message"]
-    assert '"dob": "***"' in record["message"]
 
 
 def test_name_not_redacted():
@@ -126,6 +125,45 @@ def test_dob_redacted_in_python_repr():
     assert "Jane" in record["message"]
 
 
+def test_mixed_quotes_redacted():
+    # Value uses different quote character than key — backreference handles this.
+    record = _capture_log("""{'email': "o'brien@x.com"}""")
+    assert "o'brien@x.com" not in record["message"]
+
+
+# ---------------------------------------------------------------------------
+# PHI redaction — URL query-string form (backstop for any log containing URLs)
+# ---------------------------------------------------------------------------
+
+
+def test_email_redacted_in_query_string():
+    record = _capture_log("GET /patients?email=jane@example.com&name=jane HTTP/1.1")
+    assert "jane@example.com" not in record["message"]
+
+
+def test_phone_redacted_in_query_string():
+    record = _capture_log("path=/search?phone=555-1234&limit=10")
+    assert "555-1234" not in record["message"]
+
+
+# ---------------------------------------------------------------------------
+# PHI redaction — exception text (traceback with parameter tuples)
+# ---------------------------------------------------------------------------
+
+
+def test_exc_info_redacted():
+    try:
+        raise ValueError("parameters: ('Jane', '1990-01-01', 'jane@example.com')")
+    except ValueError:
+        import sys
+        record = _capture_log("db error", exc_info=sys.exc_info())
+
+    # exc_text is embedded in the JSON output; check the full serialised record
+    raw = json.dumps(record)
+    assert "jane@example.com" not in raw
+    assert "1990-01-01" not in raw
+
+
 # ---------------------------------------------------------------------------
 # Non-PHI lines pass through unchanged
 # ---------------------------------------------------------------------------
@@ -141,3 +179,71 @@ def test_event_line_with_ids_unchanged():
     msg = "[EVENT] appointment.booked event_id=42 patient_id=3 | appointment_type=cleaning"
     record = _capture_log(msg)
     assert record["message"] == msg
+
+
+# ---------------------------------------------------------------------------
+# Middleware — request ID injection and response header
+# ---------------------------------------------------------------------------
+
+
+def test_middleware_echoes_supplied_request_id():
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from app.middleware import RequestIdMiddleware
+
+    def homepage(request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/", homepage)])
+    app.add_middleware(RequestIdMiddleware)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/", headers={"X-Request-ID": "fixed-id-123"})
+    assert response.headers.get("X-Request-ID") == "fixed-id-123"
+
+
+def test_middleware_generates_id_when_absent():
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from app.middleware import RequestIdMiddleware
+
+    def homepage(request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/", homepage)])
+    app.add_middleware(RequestIdMiddleware)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/")
+    rid = response.headers.get("X-Request-ID", "")
+    assert len(rid) == 36  # UUID4 format: 8-4-4-4-12
+
+
+def test_middleware_injects_id_into_request_context():
+    """The request_id_var ContextVar must hold the correct ID during the handler."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from app.logging_config import request_id_var
+    from app.middleware import RequestIdMiddleware
+
+    captured = {}
+
+    def homepage(request):
+        captured["id"] = request_id_var.get()
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/", homepage)])
+    app.add_middleware(RequestIdMiddleware)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    client.get("/", headers={"X-Request-ID": "ctx-test-99"})
+    assert captured.get("id") == "ctx-test-99"

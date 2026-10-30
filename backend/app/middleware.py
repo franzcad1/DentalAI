@@ -26,8 +26,10 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         token = request_id_var.set(request_id)
         start = time.perf_counter()
+        status_code = 500  # default; overwritten on a normal response
         try:
             response = await call_next(request)
+            status_code = response.status_code
         finally:
             duration_ms = round((time.perf_counter() - start) * 1000)
             logger.info(
@@ -35,7 +37,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
                 extra={
                     "method": request.method,
                     "path": request.url.path,
-                    "status": response.status_code if "response" in dir() else 500,
+                    "status": status_code,
                     "duration_ms": duration_ms,
                 },
             )

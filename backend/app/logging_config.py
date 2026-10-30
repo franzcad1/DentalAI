@@ -4,43 +4,95 @@ Sets up JSON-formatted logs so every line is machine-readable and can be
 ingested by any log aggregator (Datadog, CloudWatch, Loki) without a
 custom parser.
 
-Two filters are attached to the handler:
-- RequestIdFilter: injects the per-request trace ID from a ContextVar into
-  every log record so all lines for one HTTP call share the same request_id.
-- PhiRedactingFilter: scrubs email, phone, and dob values before the record
-  is formatted — prevents incidental PHI disclosure in application logs
-  (Ontario PHIPA requirement for healthcare data).
+Three layers of PHI protection:
+1. Source discipline: agent.py logs input_keys only; bus.py logs ID fields only.
+2. PhiRedactingFilter: scrubs email/phone/dob from log messages at emit time.
+   Covers both JSON  "email": "value"  and Python-repr  'email': 'value'  using
+   a backreference so values containing the other quote character are handled
+   correctly. Also covers URL query-string form  email=value.
+3. PhiRedactingJsonFormatter: overrides formatException so SQLAlchemy
+   IntegrityError messages (which embed parameter tuples) are scrubbed before
+   they are serialised into the JSON exc_text field.
 
-Uvicorn's own loggers are reconfigured to use the same handler so the entire
-process produces a single uniform stream rather than mixing plain-text and
-JSON lines.
+Uvicorn's access log is suppressed because RequestIdMiddleware already emits a
+structured request-completed line with method, path, status, and duration_ms.
+This also eliminates query-string leaks from the uvicorn access line format
+'GET /patients?email=… HTTP/1.1'.
 """
 
 import contextvars
 import logging
 import re
 import sys
-from typing import Any
 
 from pythonjsonlogger import jsonlogger
 
-# Holds the current request's trace ID. Set by RequestIdMiddleware on each
-# incoming request; defaults to "-" when called outside an HTTP context
-# (e.g. background scheduler jobs, seed scripts).
+# ---------------------------------------------------------------------------
+# Per-request trace ID
+# ---------------------------------------------------------------------------
+
+# Set by RequestIdMiddleware on each incoming request.
+# Defaults to "-" in scheduler threads and seed scripts that have no request
+# context — that is expected and safe.
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "request_id", default="-"
 )
 
-# PHI field names that must never appear as plain values in logs.
+# ---------------------------------------------------------------------------
+# PHI patterns
+# ---------------------------------------------------------------------------
+
 _PHI_FIELDS = ("email", "phone", "dob")
 
-# Matches both JSON  "email": "value"  and Python-repr  'email': 'value'
-# so the filter catches tool-call dicts logged via %s formatting as well as
-# structured JSON strings.
-_PHI_PATTERN = re.compile(
-    r'(["\'](?:' + "|".join(_PHI_FIELDS) + r')["\']\s*:\s*)["\'][^"\']*["\']',
+# Matches key-value pairs in JSON or Python repr.
+# Group 1 captures everything up to the opening value quote (key + colon).
+# Group 3 captures the opening value quote so we can use it as the closing
+# quote in the replacement — this handles values that contain the OTHER quote
+# character, e.g. 'email': "o'brien@x.com".
+_PHI_KV = re.compile(
+    r'((["\'])(?:' + "|".join(_PHI_FIELDS) + r')\2\s*:\s*)(["\'])((?:(?!\3).)*)\3',
     re.IGNORECASE,
 )
+
+# Matches URL query-string form: email=a@b.com, phone=555, dob=1990-01-01.
+# Stops at whitespace, &, quotes, or < so it doesn't eat the rest of the line.
+_PHI_QS = re.compile(
+    r'((?:' + "|".join(_PHI_FIELDS) + r')=)[^\s&"\'<>]+',
+    re.IGNORECASE,
+)
+
+# Exception messages from DB adapters (e.g. SQLAlchemy IntegrityError) embed raw
+# parameter values WITHOUT a field-name context, e.g.:
+#   ValueError: parameters: ('Jane', '1990-01-01', 'jane@example.com')
+# These two patterns catch email addresses and ISO dates that appear as bare values.
+_EMAIL_BARE = re.compile(r'[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}')
+# Only match dates enclosed in single or double quotes to avoid redacting file
+# paths or version strings that contain digit sequences.
+_DATE_QUOTED = re.compile(r'(["\'])(\d{4}-\d{2}-\d{2})\1')
+
+
+def _redact(text: str) -> str:
+    """Apply key-value and query-string PHI redaction patterns to *text*."""
+    text = _PHI_KV.sub(r'\1\3***\3', text)
+    text = _PHI_QS.sub(r'\1***', text)
+    return text
+
+
+def _redact_exc(text: str) -> str:
+    """Stronger redaction for exception / traceback text.
+
+    Adds bare-value patterns on top of the standard key-value pass because
+    database adapters embed raw parameter tuples without field-name context.
+    """
+    text = _redact(text)
+    text = _EMAIL_BARE.sub('***', text)
+    text = _DATE_QUOTED.sub(r'\1***\1', text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Filters
+# ---------------------------------------------------------------------------
 
 
 class RequestIdFilter(logging.Filter):
@@ -52,26 +104,85 @@ class RequestIdFilter(logging.Filter):
 
 
 class PhiRedactingFilter(logging.Filter):
-    """Scrub PHI field values from log messages before formatting.
+    """Scrub PHI field values from log messages and exception text before formatting.
 
-    Replaces the value of email, phone, and dob keys in both JSON strings
-    and Python-repr dicts with "***". Never drops a record.
+    Handles three surfaces:
+    - record.msg / args: the main log message
+    - record.exc_info: pre-formats the traceback and redacts it, then clears
+      exc_info so the formatter uses our version instead of reformatting it
+    - record.exc_text: redacts any already-cached exception text
+
+    Never drops a record — always returns True.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Redact main message
         msg = record.getMessage()
-        redacted = _PHI_PATTERN.sub(r'\1"***"', msg)
+        redacted = _redact(msg)
         if redacted != msg:
             record.msg = redacted
             record.args = ()
+
+        # Pre-format exception info, redact it, then clear exc_info so the
+        # formatter (json-logger) uses our exc_text rather than reformatting.
+        if record.exc_info:
+            import traceback as _tb
+            raw = "".join(_tb.format_exception(*record.exc_info))
+            record.exc_text = _redact_exc(raw)
+            record.exc_info = None  # prevent formatter re-formatting
+        elif record.exc_text:
+            record.exc_text = _redact_exc(record.exc_text)
+
         return True
 
 
+# ---------------------------------------------------------------------------
+# Formatter
+# ---------------------------------------------------------------------------
+
+
+class PhiRedactingJsonFormatter(jsonlogger.JsonFormatter):
+    """JSON formatter that redacts PHI from exception text.
+
+    The base JsonFormatter calls formatException() after the message filter
+    runs, so exc_info (e.g. SQLAlchemy IntegrityError with parameter tuples)
+    would bypass PhiRedactingFilter. Overriding formatException and format
+    here closes that gap.
+    """
+
+    def formatException(self, exc_info) -> str:  # type: ignore[override]
+        return _redact_exc(super().formatException(exc_info))
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Pre-populate exc_text with the redacted version so the parent's
+        # format() uses our scrubbed text rather than regenerating it.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        return super().format(record)
+
+
+# ---------------------------------------------------------------------------
+# Handler factory (used by configure_logging and tests)
+# ---------------------------------------------------------------------------
+
+# taskName was added to LogRecord in Python 3.12. python-json-logger 2.0.7's
+# default RESERVED_ATTRS predates that, so it would appear in JSON output on
+# 3.12+. Import the default list and extend it.
+try:
+    from pythonjsonlogger.jsonlogger import RESERVED_ATTRS as _BASE_RESERVED
+    _RESERVED_ATTRS = list(_BASE_RESERVED) + ["taskName"]
+except ImportError:  # pragma: no cover — older library version
+    _RESERVED_ATTRS = ["taskName"]
+
+
 def _make_handler() -> logging.StreamHandler:  # type: ignore[type-arg]
+    """Build and return a configured JSON stream handler.
+
+    Exported so tests can create an identical handler pointed at a
+    StringIO buffer rather than stdout.
+    """
     handler = logging.StreamHandler(sys.stdout)
-    formatter = jsonlogger.JsonFormatter(
-        # taskName is injected by python-json-logger in some versions and adds
-        # noise — exclude it by listing only the fields we actually want.
+    formatter = PhiRedactingJsonFormatter(
         fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
         rename_fields={
             "asctime": "timestamp",
@@ -79,6 +190,7 @@ def _make_handler() -> logging.StreamHandler:  # type: ignore[type-arg]
             "name": "logger",
         },
         datefmt="%Y-%m-%dT%H:%M:%S",
+        reserved_attrs=_RESERVED_ATTRS,
     )
     handler.setFormatter(formatter)
     handler.addFilter(RequestIdFilter())
@@ -86,27 +198,33 @@ def _make_handler() -> logging.StreamHandler:  # type: ignore[type-arg]
     return handler
 
 
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
 def configure_logging() -> None:
     """Replace all handlers with a single structured JSON handler.
 
-    Call this once at application startup, before any other imports that
-    might create loggers, so the entire process uses one consistent format.
-
-    Also reconfigures uvicorn's loggers so they emit JSON through the same
-    handler rather than mixing plain-text access lines with our JSON stream.
+    Call once at application startup, before any other imports that might
+    create loggers, so the entire process produces one uniform JSON stream.
     """
     handler = _make_handler()
 
-    # Root logger — catches everything not explicitly configured below.
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(logging.INFO)
 
-    # Uvicorn uses three loggers. Repoint them at our handler so the process
-    # produces a single uniform JSON stream.
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        uv_logger = logging.getLogger(name)
-        uv_logger.handlers.clear()
-        uv_logger.addHandler(handler)
-        uv_logger.propagate = False
+    # Repoint uvicorn's error logger at our handler.
+    for name in ("uvicorn", "uvicorn.error"):
+        lg = logging.getLogger(name)
+        lg.handlers.clear()
+        lg.addHandler(handler)
+        lg.propagate = False
+
+    # Suppress uvicorn's access log entirely — RequestIdMiddleware already
+    # emits a structured request-completed line (method, path, status,
+    # duration_ms). Keeping the access log would also leak query strings
+    # such as ?email=… in its 'GET /path?email=… HTTP/1.1' format.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
