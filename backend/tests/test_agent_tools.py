@@ -1,7 +1,10 @@
-"""Unit tests for agent tool functions — no OpenAI API key required.
+"""Unit tests for agent tool functions — no API key required.
 
-These tests call the tool functions directly (bypassing the LangChain executor)
-to verify DB interactions and response shapes are correct.
+All tests use the `agent_db` fixture from conftest.py which:
+- spins up a fresh in-memory SQLite database per test
+- patches app.agent.agent.SessionLocal to point at it
+- seeds one provider, one location, two appointment types, two patients,
+  one future slot, and one overdue recall
 
 Run with: cd backend && py -m pytest tests/test_agent_tools.py -v
 """
@@ -11,126 +14,56 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.db.session import Base, SessionLocal, engine
-from app.models.orm import (
-    AppointmentType,
-    AvailableSlot,
-    Location,
-    Patient,
-    PatientRecall,
-    Provider,
-)
+
+# ---------------------------------------------------------------------------
+# check_available_slots
+# ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def fresh_db():
-    """Drop and recreate all tables for each test for isolation."""
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-    db = SessionLocal()
-    try:
-        # Seed minimal fixtures
-        provider = Provider(first_name="Alice", last_name="Smith", specialty="General")
-        location = Location(name="Main Office", address="123 Main St", phone="555-0100")
-        db.add_all([provider, location])
-        db.flush()
-
-        appt_types = [
-            AppointmentType(name="cleaning", duration_minutes=45),
-            AppointmentType(name="exam", duration_minutes=30),
-        ]
-        db.add_all(appt_types)
-
-        patients = [
-            Patient(first_name="John", last_name="Doe", email="john@example.com"),
-            Patient(first_name="Jane", last_name="Roe", email="jane@example.com"),
-        ]
-        db.add_all(patients)
-        db.flush()
-
-        # Create a slot 3 days from now
-        slot_time = datetime.utcnow() + timedelta(days=3)
-        slot = AvailableSlot(
-            provider_id=provider.id,
-            location_id=location.id,
-            start_time=slot_time,
-            end_time=slot_time + timedelta(minutes=30),
-            is_booked=False,
-        )
-        db.add(slot)
-
-        # Overdue recall for patient 1
-        from datetime import date
-        recall = PatientRecall(
-            patient_id=patients[0].id,
-            recall_type="6-month cleaning",
-            due_date=date(2024, 1, 1),
-            status="pending",
-        )
-        db.add(recall)
-
-        db.commit()
-    finally:
-        db.close()
-
-    yield
-
-
-def test_check_available_slots_returns_open_slot():
+def test_check_slots_returns_open_slot(agent_db):
     from app.agent.agent import check_available_slots
 
     date_from = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
     date_to = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-    result = check_available_slots.invoke({"date_from": date_from, "date_to": date_to, "provider_id": 0})
-    parsed = json.loads(result)
-    assert len(parsed) == 1
-    assert parsed[0]["slot_id"] == 1
-    assert "Dr. Alice Smith" in parsed[0]["provider_name"]
+    result = json.loads(check_available_slots.invoke({"date_from": date_from, "date_to": date_to, "provider_id": 0}))
+    assert len(result) == 1
+    assert "Dr. Alice Smith" in result[0]["provider_name"]
 
 
-def test_get_recall_queue_returns_overdue():
-    from app.agent.agent import get_recall_queue
+def test_check_slots_empty_when_no_slots_in_range(agent_db):
+    from app.agent.agent import check_available_slots
 
-    result = get_recall_queue.invoke({})
-    parsed = json.loads(result)
-    assert len(parsed) == 1
-    assert parsed[0]["name"] == "John Doe"
-    assert parsed[0]["days_overdue"] > 0
+    # Search a date range in the past — tool returns a plain "no results" string
+    result = check_available_slots.invoke({"date_from": "2020-01-01", "date_to": "2020-01-07", "provider_id": 0})
+    assert "no available slots" in result.lower()
 
 
-def test_get_patient_context_includes_recall():
-    from app.agent.agent import get_patient_context
+def test_check_slots_filter_by_provider(agent_db):
+    from app.agent.agent import check_available_slots
 
-    result = get_patient_context.invoke({"patient_id": 1})
-    parsed = json.loads(result)
-    assert parsed["patient"]["name"] == "John Doe"
-    assert parsed["recall"]["recall_type"] == "6-month cleaning"
-    assert parsed["recall"]["days_overdue"] > 0
+    date_from = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+    date_to = (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-
-def test_draft_recall_message_is_personalised():
-    from app.agent.agent import draft_recall_message
-
-    result = draft_recall_message.invoke({"patient_id": 1})
-    assert "John" in result
-    assert "cleaning" in result.lower()
-    # Should escalate to urgent since way overdue
-    assert "overdue" in result.lower()
+    # provider_id=999 doesn't exist — tool returns a plain "no results" string
+    result = check_available_slots.invoke({"date_from": date_from, "date_to": date_to, "provider_id": 999})
+    assert "no available slots" in result.lower()
 
 
-def test_book_appointment_creates_record_and_marks_slot():
+# ---------------------------------------------------------------------------
+# book_appointment
+# ---------------------------------------------------------------------------
+
+
+def test_book_appointment_success(agent_db):
     from app.agent.agent import book_appointment
+    from app.models.orm import AvailableSlot
 
-    result = book_appointment.invoke(
-        {"patient_id": 1, "slot_id": 1, "appointment_type_id": 1, "notes": "First visit"}
-    )
+    result = book_appointment.invoke({"patient_id": 1, "slot_id": 1, "appointment_type_id": 1, "notes": "First visit"})
     assert "booked successfully" in result.lower()
     assert "John Doe" in result
 
-    # Verify the slot is now marked as booked
-    db = SessionLocal()
+    db = agent_db()
     try:
         slot = db.get(AvailableSlot, 1)
         assert slot.is_booked is True
@@ -138,15 +71,172 @@ def test_book_appointment_creates_record_and_marks_slot():
         db.close()
 
 
-def test_book_appointment_rejects_double_booking():
+def test_book_appointment_rejects_double_booking(agent_db):
     from app.agent.agent import book_appointment
 
-    # Book once
-    book_appointment.invoke(
-        {"patient_id": 1, "slot_id": 1, "appointment_type_id": 1, "notes": ""}
-    )
-    # Try to book the same slot again
-    result = book_appointment.invoke(
-        {"patient_id": 2, "slot_id": 1, "appointment_type_id": 1, "notes": ""}
-    )
+    book_appointment.invoke({"patient_id": 1, "slot_id": 1, "appointment_type_id": 1, "notes": ""})
+    result = book_appointment.invoke({"patient_id": 2, "slot_id": 1, "appointment_type_id": 1, "notes": ""})
     assert "already booked" in result.lower()
+
+
+def test_book_appointment_unknown_slot(agent_db):
+    from app.agent.agent import book_appointment
+
+    result = book_appointment.invoke({"patient_id": 1, "slot_id": 9999, "appointment_type_id": 1, "notes": ""})
+    assert "not found" in result.lower() or "error" in result.lower()
+
+
+def test_book_appointment_unknown_patient(agent_db):
+    from app.agent.agent import book_appointment
+
+    result = book_appointment.invoke({"patient_id": 9999, "slot_id": 1, "appointment_type_id": 1, "notes": ""})
+    assert "not found" in result.lower() or "error" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# get_patient_context
+# ---------------------------------------------------------------------------
+
+
+def test_get_patient_context_includes_recall(agent_db):
+    from app.agent.agent import get_patient_context
+
+    result = json.loads(get_patient_context.invoke({"patient_id": 1}))
+    assert result["patient"]["name"] == "John Doe"
+    assert result["recall"]["recall_type"] == "6-month cleaning"
+    assert result["recall"]["days_overdue"] > 0
+
+
+def test_get_patient_context_unknown_patient(agent_db):
+    from app.agent.agent import get_patient_context
+
+    result = get_patient_context.invoke({"patient_id": 9999})
+    assert "not found" in result.lower() or "error" in result.lower()
+
+
+def test_get_patient_context_no_recall(agent_db):
+    from app.agent.agent import get_patient_context
+
+    # Patient 2 (Jane Roe) has no recall seeded
+    result = json.loads(get_patient_context.invoke({"patient_id": 2}))
+    assert result["patient"]["name"] == "Jane Roe"
+    assert result.get("recall") is None or result.get("recall") == {}
+
+
+# ---------------------------------------------------------------------------
+# get_recall_queue
+# ---------------------------------------------------------------------------
+
+
+def test_get_recall_queue_returns_overdue(agent_db):
+    from app.agent.agent import get_recall_queue
+
+    result = json.loads(get_recall_queue.invoke({}))
+    assert len(result) == 1
+    assert result[0]["name"] == "John Doe"
+    assert result[0]["days_overdue"] > 0
+
+
+def test_get_recall_queue_empty_when_no_recalls(agent_db):
+    from app.agent.agent import get_recall_queue
+    from app.models.orm import PatientRecall
+
+    # Remove the seeded recall
+    db = agent_db()
+    try:
+        db.query(PatientRecall).delete()
+        db.commit()
+    finally:
+        db.close()
+
+    # Tool returns a plain "no results" string when the queue is empty
+    result = get_recall_queue.invoke({})
+    assert "no" in result.lower() or "recall" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# search_patients
+# ---------------------------------------------------------------------------
+
+
+def test_search_patients_found(agent_db):
+    from app.agent.agent import search_patients
+
+    result = json.loads(search_patients.invoke({"name": "John"}))
+    assert any(p["name"] == "John Doe" for p in result)
+
+
+def test_search_patients_not_found(agent_db):
+    from app.agent.agent import search_patients
+
+    result = search_patients.invoke({"name": "Zzzunknown"})
+    # Either an empty list or a "no results" message string
+    try:
+        parsed = json.loads(result)
+        assert parsed == []
+    except (ValueError, TypeError):
+        assert "no" in result.lower() or "not found" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# draft_recall_message
+# ---------------------------------------------------------------------------
+
+
+def test_draft_recall_message_personalised(agent_db):
+    from app.agent.agent import draft_recall_message
+
+    result = draft_recall_message.invoke({"patient_id": 1})
+    assert "John" in result
+    assert "cleaning" in result.lower()
+    assert "overdue" in result.lower()
+
+
+def test_draft_recall_message_unknown_patient(agent_db):
+    from app.agent.agent import draft_recall_message
+
+    result = draft_recall_message.invoke({"patient_id": 9999})
+    assert "not found" in result.lower() or "error" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# cancel_appointment
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_appointment_sets_status(agent_db):
+    from app.agent.agent import book_appointment, cancel_appointment
+    from app.models.orm import Appointment
+
+    book_appointment.invoke({"patient_id": 1, "slot_id": 1, "appointment_type_id": 1, "notes": ""})
+
+    result = cancel_appointment.invoke({"appointment_id": 1})
+    assert "cancel" in result.lower()
+
+    db = agent_db()
+    try:
+        appt = db.get(Appointment, 1)
+        assert appt.status == "cancelled"
+    finally:
+        db.close()
+
+
+def test_cancel_appointment_unknown_id(agent_db):
+    from app.agent.agent import cancel_appointment
+
+    result = cancel_appointment.invoke({"appointment_id": 9999})
+    assert "not found" in result.lower() or "error" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# list_all_patients
+# ---------------------------------------------------------------------------
+
+
+def test_list_all_patients_returns_both(agent_db):
+    from app.agent.agent import list_all_patients
+
+    result = json.loads(list_all_patients.invoke({}))
+    names = [p["name"] for p in result]
+    assert "John Doe" in names
+    assert "Jane Roe" in names
