@@ -26,9 +26,9 @@ A portfolio project demonstrating production-grade AI engineering with Python, F
                            │
 ┌──────────────────────────▼──────────┐   ┌────────────────────────┐
 │        SQLAlchemy + SQLite          │   │   LangChain Agent      │
-│                                     │   │   (Groq LLM)           │
+│                                     │   │   (Groq-hosted model)  │
 │  Patient  Provider  Location        │   │                        │
-│  Appointment  AvailableSlot         │   │  15 tools — booking,   │
+│  Appointment  AvailableSlot         │   │  14 tools — booking,   │
 │  PatientRecall  Event               │   │  scheduling, recalls,  │
 │                                     │   │  patient management    │
 └──────────────────────────┬──────────┘   └────────────────────────┘
@@ -102,6 +102,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env               # add GROQ_API_KEY if you want agent chat
+alembic upgrade head               # run migrations
 python -m app.db.seed              # populate the database
 uvicorn app.main:app --reload      # starts on port 8000
 
@@ -116,15 +117,13 @@ npm run dev                        # starts on port 5173
 
 ## Authentication
 
-All endpoints except `GET /health` require a `Bearer` token in the `Authorization` header.
+Auth is scaffolded (`auth.py` generates an HS256 JWT printed at startup) but not enforced yet — the Bearer header is currently ignored by all API routes. Enforcement is planned for a later milestone.
 
-**Getting the dev token:** The token is printed to the backend console on startup:
+**Dev token (for future use):** printed to the backend console on startup:
 ```
 INFO | app.main | Test Bearer token (valid 24 h):
 INFO | app.main |   eyJhbGci...
 ```
-
-Paste it into the frontend's token gate UI, or set `VITE_DEV_TOKEN=<token>` in `frontend/.env` to skip the gate entirely.
 
 ---
 
@@ -284,7 +283,7 @@ Response:
 
 ## LangChain Agent
 
-The agent is built on **Groq function calling** with 15 tools defined using LangChain's `@tool` decorator. Each tool opens its own database session and returns a string — either JSON data or a human-readable confirmation. Rate-limit retries are surfaced in real time to the frontend via a polling status endpoint.
+The agent is built on **Groq function calling** with 14 tools defined using LangChain's `@tool` decorator. Each tool opens its own database session and returns a string — either JSON data or a human-readable confirmation. Rate-limit retries are surfaced in real time to the frontend via a polling status endpoint.
 
 ### Agent Loop
 
@@ -406,9 +405,12 @@ dentalai/
 │   ├── docker-entrypoint.sh     # seeds DB on first boot, then starts uvicorn
 │   ├── requirements.txt
 │   ├── .env.example
+│   ├── alembic/                 # schema migrations
+│   │   └── versions/
 │   └── app/
 │       ├── main.py              # create_app() factory + lifespan
 │       ├── auth.py              # HS256 JWT
+│       ├── logging_config.py    # JSON logging + PHI redaction
 │       ├── api/
 │       │   ├── patients.py
 │       │   ├── appointments.py
@@ -420,7 +422,7 @@ dentalai/
 │       │   ├── webhooks.py
 │       │   └── agent_router.py
 │       ├── agent/
-│       │   └── agent.py         # tools + OpenAI function-calling loop
+│       │   └── agent.py         # tools + Groq function-calling loop
 │       ├── events/
 │       │   ├── bus.py           # emit_event()
 │       │   └── scheduler.py     # APScheduler jobs
@@ -453,12 +455,58 @@ dentalai/
 ```bash
 cd backend
 
-# Tool unit tests (no API key needed)
-py -m pytest tests/test_agent_tools.py -v    # 6 tests
+# All tests (no API key needed for tools and logging)
+python -m pytest tests/test_agent_tools.py tests/test_logging.py tests/test_health.py -v
 
-# Health smoke test
-py -m pytest tests/test_health.py -v
-
-# End-to-end agent tests (requires OPENAI_API_KEY in .env)
-py -m pytest tests/test_agent_e2e.py -v -s
+# End-to-end agent tests (requires GROQ_API_KEY in .env)
+python -m pytest tests/test_agent_e2e.py -v -s
 ```
+
+---
+
+## M1 — Reliability Foundation
+
+**Goal:** make the codebase safe to ship: structured logging with PHI redaction, schema migrations, and a test suite that runs on a clean checkout with no external services.
+
+### What was built
+
+**Structured JSON logging with PHI redaction**
+Every log line is a JSON object with a `request_id` field threaded through the FastAPI middleware. Before any log record is emitted, a `PhiRedactingFilter` strips email, phone, and date-of-birth values from:
+- JSON key-value pairs (`"email": "..."`)
+- Python repr output (`'email': '...'`)
+- Query-string parameters (`email=...`)
+- Bare values in exception tracebacks (email addresses, quoted dates, phone numbers in multiple formats)
+
+Five regex patterns are applied in a specific order — phone-bare before query-string — to prevent partial matches (e.g. a space-format phone in a query string was previously left half-redacted). Bearer tokens never appear in structured log output. Took 5 rounds of external review to close all edge cases.
+
+**Alembic migration**
+Hand-written initial migration capturing all 8 tables. Written manually rather than autogenerated because the dev database already had tables from `create_all()` — autogenerate produced an empty diff. Configured with `render_as_batch=True` (required for SQLite ALTER support) and `compare_type=True` (detects column type changes).
+
+**Test suite**
+45 tests across 3 files, all passing on a clean checkout with no `dentalai.db` and `DATABASE_URL` unset:
+
+| File | Tests | What it covers |
+|------|-------|----------------|
+| `test_logging.py` | 24 | JSON structure, request ID, PHI redaction across all formats |
+| `test_agent_tools.py` | 19 | Agent tool functions via in-memory SQLite fixture |
+| `test_health.py` | 2 | App startup, health endpoint, patients endpoint |
+
+Key isolation decisions:
+- `conftest.py` patches both `app.agent.agent.SessionLocal` and `app.events.bus.SessionLocal` — patching only the agent module left `emit_event()` writing to the missing dev database on a clean checkout.
+- `test_health.py` uses `app.dependency_overrides[get_db]` with `StaticPool` — without `StaticPool`, SQLite's per-thread connection isolation gave the TestClient's background thread an empty database.
+
+**GitHub Actions CI**
+`.github/workflows/ci.yml` runs on every push and PR to `main`: installs dependencies, runs `alembic upgrade head` against a fresh SQLite file, then runs all 45 tests.
+
+### Numbers
+
+- 45 tests, 0 failures on clean checkout
+- 5 rounds of PHI redaction review to close all edge cases
+- 1 hand-written migration, 8 tables, 0 autogenerate drift
+- 5 PHI regex patterns; ordering matters (phone-bare before query-string)
+
+### Known gaps (later milestones)
+
+- Auth not implemented: `/api/v1/patients` is currently open; `test_health.py` reflects this
+- No latency or cost benchmarks yet (no live traffic)
+- Migration drift test (ORM vs. migration diff check) not wired into CI
