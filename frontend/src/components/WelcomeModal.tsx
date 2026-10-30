@@ -100,7 +100,7 @@ export function WelcomeModal() {
             <Button size="sm" variant="secondary" onClick={() => { dismiss(); navigate('/about') }}>
               Learn More
             </Button>
-            <Button size="sm" onClick={dismiss} className="gap-2">
+            <Button size="sm" onClick={() => { dismiss(); navigate('/') }} className="gap-2">
               Get Started
             </Button>
           </div>
