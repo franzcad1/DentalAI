@@ -20,6 +20,10 @@ from typing import AsyncGenerator, List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.logging_config import configure_logging
+
+configure_logging()
+
 from app.api import appointments, patients, recalls, slots, webhooks
 from app.api.agent_router import router as agent_router
 from app.api.appointment_types import router as appt_types_router
@@ -30,7 +34,6 @@ from app.auth import create_access_token
 from app.db.session import Base, engine
 from app.events.scheduler import start_scheduler, stop_scheduler
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 STARTUP_ID = str(uuid.uuid4())
@@ -65,6 +68,9 @@ def create_app() -> FastAPI:
         version="0.2.0",
         lifespan=lifespan,
     )
+
+    from app.middleware import RequestIdMiddleware
+    app.add_middleware(RequestIdMiddleware)
 
     extra: List[str] = [
         o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
