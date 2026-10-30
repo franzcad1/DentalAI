@@ -63,12 +63,24 @@ _PHI_QS = re.compile(
 
 # Exception messages from DB adapters (e.g. SQLAlchemy IntegrityError) embed raw
 # parameter values WITHOUT a field-name context, e.g.:
-#   ValueError: parameters: ('Jane', '1990-01-01', 'jane@example.com')
-# These two patterns catch email addresses and ISO dates that appear as bare values.
+#   ValueError: parameters: ('Jane', '1990-01-01', 'jane@example.com', '(555) 123-4567')
+# The patterns below catch email, ISO dates, and phone numbers as bare values.
 _EMAIL_BARE = re.compile(r'[\w.+%-]+@[\w.-]+\.[a-zA-Z]{2,}')
-# Only match dates enclosed in single or double quotes to avoid redacting file
-# paths or version strings that contain digit sequences.
+
+# Only match dates in single or double quotes to avoid redacting file paths and
+# version strings that happen to contain four-digit sequences.
 _DATE_QUOTED = re.compile(r'(["\'])(\d{4}-\d{2}-\d{2})\1')
+
+# Covers the most common North-American phone formats:
+#   (555) 123-4567   — seed data format
+#   555-123-4567     — hyphen-separated
+#   555.123.4567     — dot-separated
+#   +1-555-123-4567  — with country code
+# Using word-boundary / paren anchors keeps this from matching shorter IDs or
+# timestamps (HH:MM:SS is 2-2-2, not 3-3-4 digits).
+_PHONE_BARE = re.compile(
+    r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b'
+)
 
 
 def _redact(text: str) -> str:
@@ -79,14 +91,16 @@ def _redact(text: str) -> str:
 
 
 def _redact_exc(text: str) -> str:
-    """Stronger redaction for exception / traceback text.
+    """Stronger redaction for exception text and any message that may embed bare values.
 
-    Adds bare-value patterns on top of the standard key-value pass because
-    database adapters embed raw parameter tuples without field-name context.
+    Adds email, quoted-date, and phone patterns on top of the standard key-value
+    pass because database adapters embed raw parameter tuples without field-name
+    context, and log.error("fail: %s", exc) exposes the exception message directly.
     """
     text = _redact(text)
     text = _EMAIL_BARE.sub('***', text)
     text = _DATE_QUOTED.sub(r'\1***\1', text)
+    text = _PHONE_BARE.sub('***', text)
     return text
 
 
@@ -116,9 +130,11 @@ class PhiRedactingFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        # Redact main message
+        # Use the stronger _redact_exc on the message too: logger.error("fail: %s", exc)
+        # exposes bare exception text (including email / phone from parameter tuples)
+        # directly in the message line without any key-value context.
         msg = record.getMessage()
-        redacted = _redact(msg)
+        redacted = _redact_exc(msg)
         if redacted != msg:
             record.msg = redacted
             record.args = ()

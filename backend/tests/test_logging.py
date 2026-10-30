@@ -165,6 +165,38 @@ def test_exc_info_redacted():
 
 
 # ---------------------------------------------------------------------------
+# PHI redaction — bare values in message line (e.g. log.error("fail: %s", exc))
+# ---------------------------------------------------------------------------
+
+
+def test_bare_email_in_message_redacted():
+    # Simulates logger.error("Unexpected error: %s", exc) where exc contains an email.
+    record = _capture_log("Unexpected error: ValueError at jane@example.com")
+    assert "jane@example.com" not in record["message"]
+
+
+def test_bare_phone_in_message_redacted():
+    record = _capture_log("Patient contact: (555) 123-4567")
+    assert "555" not in record["message"] or "123-4567" not in record["message"]
+
+
+def test_bare_phone_hyphen_format_redacted():
+    record = _capture_log("fail: parameters: ('Jane', '555-123-4567')")
+    raw = json.dumps(record)
+    assert "555-123-4567" not in raw
+
+
+def test_exc_info_phone_redacted():
+    try:
+        raise ValueError("parameters: ('Jane', '1990-01-01', 'jane@x.com', '(555) 999-8888')")
+    except ValueError:
+        import sys
+        record = _capture_log("db error", exc_info=sys.exc_info())
+    raw = json.dumps(record)
+    assert "555" not in raw or "999-8888" not in raw
+
+
+# ---------------------------------------------------------------------------
 # Non-PHI lines pass through unchanged
 # ---------------------------------------------------------------------------
 
