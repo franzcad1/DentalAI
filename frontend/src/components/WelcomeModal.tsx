@@ -91,15 +91,6 @@ export function WelcomeModal() {
             ))}
           </div>
 
-          {/* Cold start notice */}
-          <div className="flex items-start gap-2.5 rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
-            <span className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-yellow-400 animate-pulse" />
-            <p className="text-xs text-yellow-300/80 leading-relaxed">
-              The backend is hosted on Render's free tier and may take
-              <span className="font-medium text-yellow-300"> up to 30 seconds</span> to wake up on first load.
-              The AI agent will be ready once it's online.
-            </p>
-          </div>
         </div>
 
         {/* Footer */}
