@@ -11,8 +11,15 @@ Run with: cd backend && py -m pytest tests/test_agent_tools.py -v
 
 import json
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db.session import Base
+import app.models.orm  # noqa: F401
+from app.models.orm import AvailableSlot, Location, Provider
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +55,47 @@ def test_check_slots_filter_by_provider(agent_db):
     # provider_id=999 doesn't exist — tool returns a plain "no results" string
     result = check_available_slots.invoke({"date_from": date_from, "date_to": date_to, "provider_id": 999})
     assert "no available slots" in result.lower()
+
+
+def test_check_slots_capped_at_ten():
+    """check_available_slots must return at most 10 slots regardless of DB size."""
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    db = TestSession()
+    try:
+        provider = Provider(first_name="Bob", last_name="Jones", specialty="General")
+        location = Location(name="Office", address="1 Main", phone="555-0101")
+        db.add_all([provider, location])
+        db.flush()
+
+        # Seed 15 unbooked slots spread over the next 3 days
+        base = datetime.utcnow().replace(hour=8, minute=0, second=0, microsecond=0)
+        for i in range(15):
+            start = base + timedelta(days=1, hours=i % 8)
+            db.add(AvailableSlot(
+                provider_id=provider.id,
+                location_id=location.id,
+                start_time=start,
+                end_time=start + timedelta(minutes=30),
+                is_booked=False,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    with patch("app.agent.agent.SessionLocal", TestSession), \
+         patch("app.events.bus.SessionLocal", TestSession):
+        from app.agent.agent import check_available_slots
+        date_from = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d")
+        date_to = (datetime.utcnow() + timedelta(days=4)).strftime("%Y-%m-%d")
+        result = json.loads(check_available_slots.invoke({"date_from": date_from, "date_to": date_to}))
+
+    assert len(result) <= 10, f"Expected at most 10 slots, got {len(result)}"
+
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 # ---------------------------------------------------------------------------
