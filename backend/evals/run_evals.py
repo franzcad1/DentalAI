@@ -121,7 +121,7 @@ def check_expected_args(
 def is_provider_error(exc: Exception) -> bool:
     """True when the failure is infra noise, not agent quality."""
     msg = str(exc).lower()
-    return any(kw in msg for kw in ("rate limit", "429", "timeout", "connection", "ratelimit"))
+    return any(kw in msg for kw in ("rate limit", "429", "timeout", "connection", "ratelimit", "daily token limit"))
 
 
 def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
@@ -218,7 +218,7 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
 def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
     provider_errors = [s for s in scored if s.get("provider_error")]
     errors = [s for s in scored if s.get("errored") and not s.get("provider_error")]
-    scorable = [s for s in scored if not s.get("errored")]
+    scorable = [s for s in scored if not s.get("provider_error")]
 
     total = len(scorable)
     passed = sum(1 for s in scorable if s["passed"])
@@ -259,7 +259,7 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
 
 def save_results(scored: List[Dict[str, Any]]) -> None:
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    scorable = [s for s in scored if not s.get("errored")]
+    scorable = [s for s in scored if not s.get("provider_error")]
     passed = sum(1 for s in scorable if s["passed"])
     payload = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -294,6 +294,9 @@ def main() -> None:
         print("ERROR: GROQ_API_KEY is not set — evals require a live Groq key.")
         print("Set it in backend/.env or export it before running.")
         sys.exit(2)
+
+    if args.reseed:
+        os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
 
     from app.agent.agent import run_agent as _run_agent
     global run_agent
