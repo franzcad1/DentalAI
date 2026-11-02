@@ -25,7 +25,8 @@ from app.models.orm import (
 )
 
 fake = Faker()
-rng = random.Random(42)  # fixed seed for reproducibility
+Faker.seed(42)           # deterministic names/addresses across all runs
+rng = random.Random(42)  # fixed seed for slot/appointment logic
 
 APPOINTMENT_STATUSES_HISTORY = ["completed", "cancelled", "no_show"]
 SPECIALTIES = ["General Dentistry", "Orthodontics", "Periodontics", "Endodontics", "Oral Surgery"]
