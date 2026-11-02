@@ -57,6 +57,26 @@ def test_check_slots_filter_by_provider(agent_db):
     assert "no available slots" in result.lower()
 
 
+def test_agent_fixed_overhead_within_budget():
+    """System prompt + tool schemas must stay under 2500 estimated tokens.
+
+    Uses chars // 4 as a rough approximation (~4 chars per token for English).
+    Fails fast if someone adds a verbose docstring or a new tool without trimming.
+    Budget: 2500 tokens leaves ~300 tokens of headroom above the current ~1923.
+    """
+    import json as _json
+    from app.agent.agent import _SYSTEM_PROMPT, OPENAI_TOOL_SCHEMAS
+
+    schema_str = _json.dumps(OPENAI_TOOL_SCHEMAS)
+    estimated = (len(_SYSTEM_PROMPT) + len(schema_str)) // 4
+    assert estimated <= 2500, (
+        f"Fixed overhead ~{estimated} tokens exceeds budget of 2500. "
+        f"Prompt ≈{len(_SYSTEM_PROMPT) // 4} tokens, "
+        f"schemas ≈{len(schema_str) // 4} tokens. "
+        "Trim tool descriptions or system prompt."
+    )
+
+
 def test_check_slots_capped_at_ten():
     """check_available_slots must return at most 10 slots regardless of DB size."""
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
