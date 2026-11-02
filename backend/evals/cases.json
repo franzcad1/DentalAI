@@ -1,6 +1,7 @@
 [
   {
     "id": "slot-01",
+    "smoke": true,
     "category": "scheduling",
     "input": "What slots are available this week?",
     "expected_tools": ["check_available_slots"],
@@ -28,6 +29,7 @@
   },
   {
     "id": "book-01",
+    "smoke": true,
     "category": "booking",
     "input": "Yes please book a cleaning for patient 1 with any available provider this week — go ahead and confirm it",
     "expected_tools": ["check_available_slots", "book_appointment"],
@@ -55,6 +57,7 @@
   },
   {
     "id": "recall-01",
+    "smoke": true,
     "category": "recalls",
     "input": "Which patients are most overdue for a recall?",
     "expected_tools": ["get_recall_queue"],
@@ -91,6 +94,7 @@
   },
   {
     "id": "draft-01",
+    "smoke": true,
     "category": "outreach",
     "input": "Draft a recall message for patient 1",
     "expected_tools": ["draft_recall_message"],
@@ -118,6 +122,7 @@
   },
   {
     "id": "context-01",
+    "smoke": true,
     "category": "patient-context",
     "input": "What is the current status of patient 1?",
     "expected_tools": ["get_patient_context"],
@@ -145,6 +150,7 @@
   },
   {
     "id": "search-01",
+    "smoke": true,
     "category": "search",
     "input": "Search for a patient named Jacqueline Sutton",
     "expected_tools": ["search_patients"],
@@ -199,6 +205,7 @@
   },
   {
     "id": "cancel-01",
+    "smoke": true,
     "category": "cancel",
     "input": "Cancel appointment 1",
     "expected_tools": ["cancel_appointment"],
@@ -217,6 +224,7 @@
   },
   {
     "id": "delete-01",
+    "smoke": true,
     "category": "delete",
     "input": "Delete appointment 3 — remove it entirely from the system",
     "expected_tools": ["delete_appointment"],
@@ -226,6 +234,7 @@
   },
   {
     "id": "modify-01",
+    "smoke": true,
     "category": "modify",
     "input": "Update appointment 4 status to completed",
     "expected_tools": ["modify_appointment"],
@@ -244,6 +253,7 @@
   },
   {
     "id": "multi-01",
+    "smoke": true,
     "category": "multi-step",
     "input": "Who is the most overdue patient and can you draft their recall message?",
     "expected_tools": ["get_recall_queue", "draft_recall_message"],

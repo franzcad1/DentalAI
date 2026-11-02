@@ -207,7 +207,7 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
         slots = [s for s in slots if s.start_time.hour < 17]
 
         result = []
-        for s in slots[:50]:
+        for s in slots[:10]:
             provider = db.get(Provider, s.provider_id)
             provider_name = (
                 f"Dr. {provider.first_name} {provider.last_name}"
@@ -1375,6 +1375,7 @@ _SYSTEM_PROMPT = (
     "scheduling, patient lookups, recalls, and appointment management.'\n\n"
     "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
     "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
+    "  • When the user says 'patient 1', 'patient 3', 'patient ID 5', etc., treat the number as a patient_id directly — do NOT call search_patients for a numeric ID\n"
     "- Add a new patient using add_patient\n"
     "- List all patients in the practice using list_all_patients\n"
     "- List patients seen by a specific provider using list_patients_by_provider\n"
@@ -1385,13 +1386,8 @@ _SYSTEM_PROMPT = (
     "- Permanently delete an appointment using delete_appointment(appointment_id) — use when the user says 'delete', 'remove', or 'get rid of'\n"
     "- Cancel an appointment (keeps the record) using cancel_appointment(appointment_id) — use when the user says 'cancel'\n"
     "- Modify any aspect of an appointment using modify_appointment(appointment_id, ...) — "
-    "use this for ALL appointment edits: changing provider, time/slot, type, patient, status, or notes. "
-    "Pass only the fields you want to change. It enforces office hours and checks for overlaps automatically.\n"
-    "  • Change provider only: modify_appointment(id, new_provider_id=X) — keeps same time if no conflict\n"
-    "  • Reschedule: modify_appointment(id, new_slot_id=X) — use check_available_slots first to find the slot\n"
-    "  • Change type: modify_appointment(id, new_appointment_type_id=X)\n"
-    "  • Change status: modify_appointment(id, new_status='confirmed'|'completed'|'pending'|'no_show'|'cancelled')\n"
-    "  • Multiple changes at once: modify_appointment(id, new_provider_id=X, new_slot_id=Y, new_status='confirmed')\n"
+    "use for ALL edits (provider, slot, type, status, notes). Pass only the fields to change. "
+    "To reschedule, call check_available_slots first then pass new_slot_id.\n"
     "- Retrieve patient history and recall status\n"
     "- Identify overdue patients who need outreach\n"
     "- Draft personalised recall messages\n\n"
@@ -1496,6 +1492,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     )
 
     tool_call_log: List[Dict[str, Any]] = []
+    _tokens: Dict[str, int] = {"prompt": 0, "completion": 0}
 
     def _parse_retry_wait(exc_str: str) -> float:
         """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
@@ -1520,6 +1517,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     temperature=0,
                 )
                 clear_retry_status(session_id)
+                if result.usage:
+                    _tokens["prompt"] += result.usage.prompt_tokens or 0
+                    _tokens["completion"] += result.usage.completion_tokens or 0
                 return result
             except _groq_mod.RateLimitError as exc:
                 wait = _parse_retry_wait(str(exc))
@@ -1539,6 +1539,10 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 else:
                     clear_retry_status(session_id)
                     raise
+            except _groq_mod.BadRequestError as exc:
+                # 413 Request Too Large — do not retry
+                clear_retry_status(session_id)
+                raise RuntimeError(f"413 Request too large: {exc}") from exc
             except Exception:
                 clear_retry_status(session_id)
                 raise
@@ -1629,4 +1633,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
         len(final_answer),
     )
 
-    return {"response": final_answer, "tool_calls": tool_call_log}
+    return {
+        "response": final_answer,
+        "tool_calls": tool_call_log,
+        "prompt_tokens": _tokens["prompt"],
+        "completion_tokens": _tokens["completion"],
+    }

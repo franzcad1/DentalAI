@@ -23,8 +23,9 @@ Exit codes:
   0 — score >= --fail-under
   1 — score below --fail-under (or no scorable cases)
   2 — GROQ_API_KEY not set
-  3 — category not found
+  3 — category not found / no matching cases
   4 — too many provider errors (infra outage suspected)
+  5 — daily token limit hit mid-run (partial results saved)
 """
 
 import argparse
@@ -128,6 +129,18 @@ def is_provider_error(exc: Exception) -> bool:
     return any(kw in msg for kw in ("rate limit", "429", "timeout", "connection", "ratelimit", "daily token limit"))
 
 
+def is_size_error(exc: Exception) -> bool:
+    """True when the request was rejected as too large (HTTP 413)."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in ("413", "request too large", "request entity too large", "payload too large"))
+
+
+class DailyLimitStop(Exception):
+    """Raised by run_cases when the provider's daily token limit is hit."""
+    def __init__(self, partial: List[Dict[str, Any]]):
+        self.partial = partial
+
+
 def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     called = _tools_called(result)
     expected = case.get("expected_tools", [])
@@ -147,6 +160,10 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "category": case["category"],
         "passed": passed,
         "errored": False,
+        "provider_error": False,
+        "size_error": False,
+        "prompt_tokens": result.get("prompt_tokens", 0),
+        "completion_tokens": result.get("completion_tokens", 0),
         "checks": {
             "tool_coverage": coverage,
             "tool_order": order,
@@ -177,12 +194,17 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
                 _print_failure(outcome)
         except Exception as exc:
             provider_err = is_provider_error(exc)
+            size_err = is_size_error(exc)
+            _stop_daily = "daily token limit" in str(exc).lower()
             outcome = {
                 "id": case["id"],
                 "category": case["category"],
                 "passed": False,
                 "errored": True,
                 "provider_error": provider_err,
+                "size_error": size_err,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
                 "checks": {
                     "tool_coverage": False,
                     "tool_order": False,
@@ -195,9 +217,20 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
                 "response_snippet": "",
                 "error": traceback.format_exc(),
             }
-            label = "PROVIDER_ERROR" if provider_err else "ERROR"
+            label = (
+                "DAILY_LIMIT" if _stop_daily else
+                "PROVIDER_ERROR" if provider_err else
+                "SIZE_ERROR" if size_err else
+                "ERROR"
+            )
             print(label)
             print(f"     {str(exc)[:120]}")
+            scored.append(outcome)
+            if _stop_daily:
+                raise DailyLimitStop(scored)
+            if i < len(cases) - 1:
+                time.sleep(delay)
+            continue
         scored.append(outcome)
         if i < len(cases) - 1:
             time.sleep(delay)
@@ -224,8 +257,9 @@ _PROVIDER_ERROR_LIMIT = 3  # more than this many provider errors → suspect inf
 
 def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
     provider_errors = [s for s in scored if s.get("provider_error")]
-    errors = [s for s in scored if s.get("errored") and not s.get("provider_error")]
-    scorable = [s for s in scored if not s.get("provider_error")]
+    size_errors = [s for s in scored if s.get("size_error")]
+    errors = [s for s in scored if s.get("errored") and not s.get("provider_error") and not s.get("size_error")]
+    scorable = [s for s in scored if not s.get("provider_error") and not s.get("size_error")]
 
     total = len(scorable)
     passed = sum(1 for s in scorable if s["passed"])
@@ -236,19 +270,26 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
     print(f"  Result: {passed}/{total} passed  ({pct}%)")
     if provider_errors:
         print(f"  Provider errors (excluded): {len(provider_errors)}")
+    if size_errors:
+        print(f"  Size errors / 413 (excluded): {len(size_errors)}")
     if errors:
         print(f"  Agent errors (counted as fail): {len(errors)}")
+    total_pt = sum(s.get("prompt_tokens", 0) for s in scored)
+    total_ct = sum(s.get("completion_tokens", 0) for s in scored)
+    if total_pt or total_ct:
+        print(f"  Tokens  prompt={total_pt:,}  completion={total_ct:,}  total={total_pt + total_ct:,}")
     print("=" * 56)
 
     categories: Dict[str, List[Optional[bool]]] = {}
     for s in scored:
-        result_val: Optional[bool] = None if s.get("provider_error") else s["passed"]
+        excluded = s.get("provider_error") or s.get("size_error")
+        result_val: Optional[bool] = None if excluded else s["passed"]
         categories.setdefault(s["category"], []).append(result_val)
     for cat, results in sorted(categories.items()):
         n = len([r for r in results if r is not None])
         p = sum(1 for r in results if r is True)
         errs = sum(1 for r in results if r is None)
-        suffix = f"  ({errs} provider_error)" if errs else ""
+        suffix = f"  ({errs} excluded)" if errs else ""
         print(f"  {cat:<22} {p}/{n}{suffix}")
 
     print("=" * 56)
@@ -261,7 +302,7 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
         return 4
 
     if total == 0:
-        print("  No scorable cases — GATE FAIL (all cases errored)")
+        print("  No scorable cases — GATE FAIL (all cases errored or excluded)")
         return 1
 
     if pct < fail_under:
@@ -273,7 +314,7 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
 
 def save_results(scored: List[Dict[str, Any]]) -> None:
     RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    scorable = [s for s in scored if not s.get("provider_error")]
+    scorable = [s for s in scored if not s.get("provider_error") and not s.get("size_error")]
     passed = sum(1 for s in scorable if s["passed"])
     payload = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -281,6 +322,9 @@ def save_results(scored: List[Dict[str, Any]]) -> None:
         "scorable": len(scorable),
         "passed": passed,
         "provider_errors": sum(1 for s in scored if s.get("provider_error")),
+        "size_errors": sum(1 for s in scored if s.get("size_error")),
+        "total_prompt_tokens": sum(s.get("prompt_tokens", 0) for s in scored),
+        "total_completion_tokens": sum(s.get("completion_tokens", 0) for s in scored),
         "cases": scored,
     }
     RESULTS_FILE.write_text(json.dumps(payload, indent=2))
@@ -302,6 +346,10 @@ def main() -> None:
                         help="Skip writing results/latest.json")
     parser.add_argument("--reseed", action="store_true",
                         help="Drop and recreate the database before running")
+    parser.add_argument("--full", action="store_true",
+                        help="Run all cases; default runs only smoke-tagged cases")
+    parser.add_argument("--only-missing", action="store_true",
+                        help="Skip cases that already have a completed result in latest.json")
     args = parser.parse_args()
 
     if not os.getenv("GROQ_API_KEY"):
@@ -325,17 +373,62 @@ def main() -> None:
         print("Reseeding database…")
         run_seed()
 
-    cases = json.loads(CASES_FILE.read_text())
+    all_cases = json.loads(CASES_FILE.read_text())
+
+    # --full runs everything; default runs only smoke-tagged cases
+    if args.full:
+        cases = all_cases
+    else:
+        smoke = [c for c in all_cases if c.get("smoke")]
+        cases = smoke if smoke else all_cases
+
     if args.category:
         cases = [c for c in cases if c["category"] == args.category]
         if not cases:
             print(f"No cases found for category '{args.category}'")
             sys.exit(3)
 
-    print(f"\nDentalAI Eval Harness — {len(cases)} cases")
+    # --only-missing: skip cases with a completed result in latest.json
+    prev_results: Dict[str, Any] = {}
+    if args.only_missing and RESULTS_FILE.exists():
+        prev = json.loads(RESULTS_FILE.read_text())
+        prev_results = {c["id"]: c for c in prev.get("cases", [])}
+        done_ids = {
+            cid for cid, c in prev_results.items()
+            if not c.get("errored") and not c.get("size_error")
+        }
+        cases = [c for c in cases if c["id"] not in done_ids]
+        if not cases:
+            print("All cases already complete — nothing to run.")
+            sys.exit(0)
+        print(f"Resuming: {len(done_ids)} done, {len(cases)} remaining")
+
+    suite_label = "full" if args.full else f"smoke ({len(cases)} cases)"
+    print(f"\nDentalAI Eval Harness — {suite_label}")
     print(f"Threshold: {args.fail_under}%  |  Delay: {args.delay}s\n")
 
-    scored = run_cases(cases, delay=args.delay)
+    try:
+        scored = run_cases(cases, delay=args.delay)
+    except DailyLimitStop as e:
+        scored = e.partial
+        # Merge with any previous completed results when resuming
+        if prev_results:
+            existing = {c["id"]: c for c in scored}
+            merged = [c for cid, c in prev_results.items() if cid not in existing]
+            merged.extend(scored)
+            scored = merged
+        print("\n  DAILY LIMIT reached — partial results saved.")
+        print("  Run again tomorrow with --only-missing to complete the suite.")
+        if not args.no_save:
+            save_results(scored)
+        sys.exit(5)
+
+    # Merge with previous completed results if resuming
+    if prev_results:
+        existing = {c["id"]: c for c in scored}
+        merged = [c for cid, c in prev_results.items() if cid not in existing]
+        merged.extend(scored)
+        scored = merged
 
     if not args.no_save:
         save_results(scored)
