@@ -137,8 +137,9 @@ def is_size_error(exc: Exception) -> bool:
 
 class DailyLimitStop(Exception):
     """Raised by run_cases when the provider's daily token limit is hit."""
-    def __init__(self, partial: List[Dict[str, Any]]):
+    def __init__(self, partial: List[Dict[str, Any]], provider_msg: str = ""):
         self.partial = partial
+        self.provider_msg = provider_msg
 
 
 def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,7 +228,7 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
             print(f"     {str(exc)[:120]}")
             scored.append(outcome)
             if _stop_daily:
-                raise DailyLimitStop(scored)
+                raise DailyLimitStop(scored, str(exc))
             if i < len(cases) - 1:
                 time.sleep(delay)
             continue
@@ -417,8 +418,11 @@ def main() -> None:
             merged = [c for cid, c in prev_results.items() if cid not in existing]
             merged.extend(scored)
             scored = merged
-        print("\n  DAILY LIMIT reached — partial results saved.")
-        print("  Run again tomorrow with --only-missing to complete the suite.")
+        import re as _re
+        _wait = _re.search(r"try again in\s+([\d]+m\s*[\d]+s|[\d]+\s*minutes?|[\d]+\s*seconds?)", e.provider_msg, _re.I)
+        _wait_str = f"retry in ~{_wait.group(1)}" if _wait else "retry later"
+        print(f"\n  DAILY LIMIT reached — {_wait_str}. Partial results saved.")
+        print("  Run again with --only-missing to complete the suite.")
         if not args.no_save:
             save_results(scored)
         sys.exit(5)
