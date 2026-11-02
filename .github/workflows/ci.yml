@@ -5,6 +5,7 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -35,7 +36,10 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     needs: test
-    if: ${{ secrets.GROQ_API_KEY != '' }}
+    # Run only on direct pushes to main or manual dispatch — not on PRs,
+    # to avoid spending Groq quota on every branch push.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -51,13 +55,12 @@ jobs:
 
       - name: Seed database
         working-directory: backend
-        run: |
-          alembic upgrade head
-          python -m app.db.seed
+        run: python -m app.db.seed
         env:
           DATABASE_URL: sqlite:///./dentalai.db
 
       - name: Run eval harness (gate at 80%)
+        if: ${{ env.GROQ_API_KEY != '' }}
         working-directory: backend
         run: python evals/run_evals.py --fail-under 80 --delay 2.0
         env:
