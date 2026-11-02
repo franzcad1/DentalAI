@@ -215,6 +215,9 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
         print(f"     expected_args FAIL — actual tools: {outcome['actual_tools']}")
 
 
+_PROVIDER_ERROR_LIMIT = 3  # more than this many provider errors → suspect infra outage
+
+
 def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
     provider_errors = [s for s in scored if s.get("provider_error")]
     errors = [s for s in scored if s.get("errored") and not s.get("provider_error")]
@@ -235,20 +238,27 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
 
     categories: Dict[str, List[Optional[bool]]] = {}
     for s in scored:
-        result_val: Optional[bool] = None if s.get("errored") else s["passed"]
+        result_val: Optional[bool] = None if s.get("provider_error") else s["passed"]
         categories.setdefault(s["category"], []).append(result_val)
     for cat, results in sorted(categories.items()):
         n = len([r for r in results if r is not None])
         p = sum(1 for r in results if r is True)
         errs = sum(1 for r in results if r is None)
-        suffix = f"  ({errs} error)" if errs else ""
+        suffix = f"  ({errs} provider_error)" if errs else ""
         print(f"  {cat:<22} {p}/{n}{suffix}")
 
     print("=" * 56)
 
+    if len(provider_errors) > _PROVIDER_ERROR_LIMIT:
+        print(
+            f"  INFRA OUTAGE — {len(provider_errors)} provider errors exceeds limit "
+            f"({_PROVIDER_ERROR_LIMIT}); results are not meaningful"
+        )
+        return 4
+
     if total == 0:
-        print("  No scorable cases — skipping gate check")
-        return 0
+        print("  No scorable cases — GATE FAIL (all cases errored)")
+        return 1
 
     if pct < fail_under:
         print(f"  GATE FAIL — {pct}% is below the {fail_under}% threshold")
@@ -295,7 +305,11 @@ def main() -> None:
         print("Set it in backend/.env or export it before running.")
         sys.exit(2)
 
+    # Default to eval.db so local runs never touch dentalai.db.
+    # --reseed overrides explicitly; CI sets DATABASE_URL at job level.
     if args.reseed:
+        os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
+    elif not os.environ.get("DATABASE_URL"):
         os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
 
     from app.agent.agent import run_agent as _run_agent
