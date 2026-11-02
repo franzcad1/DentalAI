@@ -20,10 +20,11 @@ Provider errors (rate limits, network failures) are counted separately
 and excluded from the pass-rate denominator so infra noise cannot fail CI.
 
 Exit codes:
-  0 — score >= --fail-under (or no scorable cases)
-  1 — score below --fail-under
+  0 — score >= --fail-under
+  1 — score below --fail-under (or no scorable cases)
   2 — GROQ_API_KEY not set
   3 — category not found
+  4 — too many provider errors (infra outage suspected)
 """
 
 import argparse
@@ -37,8 +38,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# Load .env BEFORE checking for the key — key may live in backend/.env
+# Capture shell-set DATABASE_URL before .env overwrites it, then load .env.
+# We use this flag in main() to decide whether to force eval.db.
 # ---------------------------------------------------------------------------
+_DB_URL_FROM_SHELL: bool = "DATABASE_URL" in os.environ
+
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
@@ -305,11 +309,11 @@ def main() -> None:
         print("Set it in backend/.env or export it before running.")
         sys.exit(2)
 
-    # Default to eval.db so local runs never touch dentalai.db.
-    # --reseed overrides explicitly; CI sets DATABASE_URL at job level.
-    if args.reseed:
-        os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
-    elif not os.environ.get("DATABASE_URL"):
+    # Use eval.db unless DATABASE_URL was explicitly set in the shell
+    # (e.g. CI sets it at the job level).  A value that came only from
+    # .env is treated as a dev-DB pointer and overridden here so local
+    # runs never write bookings/cancels into dentalai.db.
+    if args.reseed or not _DB_URL_FROM_SHELL:
         os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
 
     from app.agent.agent import run_agent as _run_agent
