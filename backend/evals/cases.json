@@ -1,0 +1,226 @@
+[
+  {
+    "id": "slot-01",
+    "category": "scheduling",
+    "input": "What slots are available this week?",
+    "expected_tools": ["check_available_slots"],
+    "response_contains": []
+  },
+  {
+    "id": "slot-02",
+    "category": "scheduling",
+    "input": "Are there any open appointments next week?",
+    "expected_tools": ["check_available_slots"],
+    "response_contains": []
+  },
+  {
+    "id": "slot-03",
+    "category": "scheduling",
+    "input": "Find me an open slot for a cleaning in the next 7 days",
+    "expected_tools": ["check_available_slots"],
+    "response_contains": []
+  },
+  {
+    "id": "book-01",
+    "category": "booking",
+    "input": "Book a cleaning for patient 1 with any available provider this week",
+    "expected_tools": ["check_available_slots", "book_appointment"],
+    "response_contains": ["patient", "book"]
+  },
+  {
+    "id": "book-02",
+    "category": "booking",
+    "input": "Schedule an exam for patient 2 next week",
+    "expected_tools": ["check_available_slots", "book_appointment"],
+    "response_contains": []
+  },
+  {
+    "id": "book-03",
+    "category": "booking",
+    "input": "I need to book patient 3 in for a cleaning as soon as possible",
+    "expected_tools": ["check_available_slots", "book_appointment"],
+    "response_contains": []
+  },
+  {
+    "id": "recall-01",
+    "category": "recalls",
+    "input": "Which patients are most overdue for a recall?",
+    "expected_tools": ["get_recall_queue"],
+    "response_contains": ["recall", "overdue"]
+  },
+  {
+    "id": "recall-02",
+    "category": "recalls",
+    "input": "Show me the recall queue",
+    "expected_tools": ["get_recall_queue"],
+    "response_contains": []
+  },
+  {
+    "id": "recall-03",
+    "category": "recalls",
+    "input": "Who is most overdue for a cleaning?",
+    "expected_tools": ["get_recall_queue"],
+    "response_contains": []
+  },
+  {
+    "id": "recall-04",
+    "category": "recalls",
+    "input": "List all patients who need to come back in",
+    "expected_tools": ["get_recall_queue"],
+    "response_contains": []
+  },
+  {
+    "id": "draft-01",
+    "category": "outreach",
+    "input": "Draft a recall message for patient 1",
+    "expected_tools": ["draft_recall_message"],
+    "response_contains": []
+  },
+  {
+    "id": "draft-02",
+    "category": "outreach",
+    "input": "Write an outreach message for patient 2 about their overdue recall",
+    "expected_tools": ["draft_recall_message"],
+    "response_contains": []
+  },
+  {
+    "id": "draft-03",
+    "category": "outreach",
+    "input": "Send a reminder to patient 3 that they are overdue",
+    "expected_tools": ["draft_recall_message"],
+    "response_contains": []
+  },
+  {
+    "id": "context-01",
+    "category": "patient-context",
+    "input": "What is the current status of patient 1?",
+    "expected_tools": ["get_patient_context"],
+    "response_contains": []
+  },
+  {
+    "id": "context-02",
+    "category": "patient-context",
+    "input": "Give me a summary for patient 2",
+    "expected_tools": ["get_patient_context"],
+    "response_contains": []
+  },
+  {
+    "id": "context-03",
+    "category": "patient-context",
+    "input": "When did patient 3 last come in and do they have a recall?",
+    "expected_tools": ["get_patient_context"],
+    "response_contains": []
+  },
+  {
+    "id": "search-01",
+    "category": "search",
+    "input": "Search for a patient named John",
+    "expected_tools": ["search_patients"],
+    "response_contains": []
+  },
+  {
+    "id": "search-02",
+    "category": "search",
+    "input": "Find patients with the last name Smith",
+    "expected_tools": ["search_patients"],
+    "response_contains": []
+  },
+  {
+    "id": "search-03",
+    "category": "search",
+    "input": "Is there a patient called Jane in the system?",
+    "expected_tools": ["search_patients"],
+    "response_contains": []
+  },
+  {
+    "id": "list-01",
+    "category": "search",
+    "input": "List all patients in the practice",
+    "expected_tools": ["list_all_patients"],
+    "response_contains": []
+  },
+  {
+    "id": "list-02",
+    "category": "search",
+    "input": "How many patients do we have?",
+    "expected_tools": ["list_all_patients"],
+    "response_contains": []
+  },
+  {
+    "id": "appt-01",
+    "category": "appointments",
+    "input": "What appointments does patient 1 have coming up?",
+    "expected_tools": ["get_patient_appointments"],
+    "response_contains": []
+  },
+  {
+    "id": "appt-02",
+    "category": "appointments",
+    "input": "Does patient 2 have any appointments scheduled?",
+    "expected_tools": ["get_patient_appointments"],
+    "response_contains": []
+  },
+  {
+    "id": "appt-03",
+    "category": "appointments",
+    "input": "Show me today's schedule",
+    "expected_tools": ["get_appointments_for_date"],
+    "response_contains": []
+  },
+  {
+    "id": "cancel-01",
+    "category": "cancel",
+    "input": "Cancel appointment 1",
+    "expected_tools": ["cancel_appointment"],
+    "response_contains": ["cancel"]
+  },
+  {
+    "id": "cancel-02",
+    "category": "cancel",
+    "input": "The patient called to cancel their appointment — appointment ID 2",
+    "expected_tools": ["cancel_appointment"],
+    "response_contains": []
+  },
+  {
+    "id": "multi-01",
+    "category": "multi-step",
+    "input": "Who is the most overdue patient and can you draft their recall message?",
+    "expected_tools": ["get_recall_queue", "draft_recall_message"],
+    "response_contains": []
+  },
+  {
+    "id": "multi-02",
+    "category": "multi-step",
+    "input": "Look up patient 1, then book them in for a cleaning this week",
+    "expected_tools": ["get_patient_context", "check_available_slots", "book_appointment"],
+    "response_contains": []
+  },
+  {
+    "id": "multi-03",
+    "category": "multi-step",
+    "input": "Search for John and tell me their upcoming appointments",
+    "expected_tools": ["search_patients", "get_patient_appointments"],
+    "response_contains": []
+  },
+  {
+    "id": "multi-04",
+    "category": "multi-step",
+    "input": "Get the recall queue and draft messages for the top two most overdue patients",
+    "expected_tools": ["get_recall_queue", "draft_recall_message"],
+    "response_contains": []
+  },
+  {
+    "id": "provider-01",
+    "category": "search",
+    "input": "Which patients has Dr. Smith seen?",
+    "expected_tools": ["list_patients_by_provider"],
+    "response_contains": []
+  },
+  {
+    "id": "add-01",
+    "category": "patient-mgmt",
+    "input": "Add a new patient: first name Test, last name Patient, email test@example.com",
+    "expected_tools": ["add_patient"],
+    "response_contains": []
+  }
+]

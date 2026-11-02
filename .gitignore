@@ -1,3 +1,6 @@
+# Eval run outputs (keep results/ dir via .gitkeep, ignore actual JSON)
+backend/evals/results/*.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
