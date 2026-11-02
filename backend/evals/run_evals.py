@@ -422,7 +422,9 @@ def main() -> None:
         _wait = _re.search(r"try again in\s+([\d]+m\s*[\d]+s|[\d]+\s*minutes?|[\d]+\s*seconds?)", e.provider_msg, _re.I)
         _wait_str = f"retry in ~{_wait.group(1)}" if _wait else "retry later"
         print(f"\n  DAILY LIMIT reached — {_wait_str}. Partial results saved.")
-        print("  Run again with --only-missing to complete the suite.")
+        print("  Note: earlier runs in the last 24 h still count against your quota.")
+        print("  Waiting a few minutes may only free one or two cases.")
+        print("  Run again with --only-missing to continue.")
         if not args.no_save:
             save_results(scored)
         sys.exit(5)

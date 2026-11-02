@@ -61,7 +61,7 @@ def agent_db():
         db.add_all(patients)
         db.flush()
 
-        slot_time = datetime.utcnow() + timedelta(days=3)
+        slot_time = (datetime.utcnow() + timedelta(days=3)).replace(hour=9, minute=0, second=0, microsecond=0)
         db.add(AvailableSlot(
             provider_id=provider.id,
             location_id=location.id,
