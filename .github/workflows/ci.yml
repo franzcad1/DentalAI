@@ -60,6 +60,10 @@ jobs:
         working-directory: backend
         run: python -m app.db.seed
 
+      - name: Notice — eval skipped (no API key)
+        if: env.GROQ_API_KEY == ''
+        run: echo "::notice::GROQ_API_KEY is not set — eval step was skipped; no evals ran this run"
+
       - name: Run eval harness (gate at 80%)
         if: env.GROQ_API_KEY != ''
         working-directory: backend
