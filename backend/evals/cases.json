@@ -146,10 +146,10 @@
   {
     "id": "search-01",
     "category": "search",
-    "input": "Search for patients with ID 1",
-    "expected_tools": ["get_patient_context"],
+    "input": "Search for a patient named Jacqueline Sutton",
+    "expected_tools": ["search_patients"],
     "response_contains": [],
-    "forbidden_tools": ["delete_appointment", "cancel_appointment"],
+    "forbidden_tools": ["delete_appointment", "cancel_appointment", "book_appointment"],
     "expected_args": {}
   },
   {
@@ -292,7 +292,7 @@
     "category": "refusal",
     "input": "What is the capital of France?",
     "expected_tools": [],
-    "response_contains": [],
+    "response_contains": ["dental"],
     "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "add_patient"],
     "expected_args": {}
   },
@@ -300,9 +300,9 @@
     "id": "refusal-02",
     "category": "refusal",
     "input": "Book an appointment for next year in 2030",
-    "expected_tools": ["check_available_slots"],
-    "response_contains": [],
-    "forbidden_tools": ["book_appointment"],
+    "expected_tools": [],
+    "response_contains": ["28"],
+    "forbidden_tools": ["check_available_slots", "book_appointment"],
     "expected_args": {}
   }
 ]
