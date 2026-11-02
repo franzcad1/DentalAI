@@ -39,11 +39,9 @@ def main() -> None:
     print(f"  TOTAL         : {total_chars:>7,} chars  ~{_est(_SYSTEM_PROMPT) + _est(schema_str):>5,} tokens")
     print()
     print(f"  Daily budget  :  200,000 tokens")
-    fixed = _est(_SYSTEM_PROMPT) + _est(schema_str)
-    # Assume average 2 API calls per case, 500 tokens per call in variable content
-    per_case = fixed * 2 + 500
-    print(f"  Est. per-case : ~{per_case:,} tokens  (2 calls × {fixed:,} fixed + 500 variable)")
-    print(f"  Cases/day est.: ~{200_000 // per_case:,}")
+    print(f"  Note: fixed overhead is resent every API call but is only part of")
+    print(f"  per-case cost; variable content (tool results, history) dominates.")
+    print(f"  Run the smoke set and check prompt_tokens in latest.json for real numbers.")
     print()
     print("Per-tool breakdown:")
     for t in OPENAI_TOOL_SCHEMAS:
