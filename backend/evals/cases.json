@@ -33,7 +33,7 @@
     "category": "booking",
     "input": "Yes please book a cleaning for patient 1 with any available provider this week — go ahead and confirm it",
     "expected_tools": ["check_available_slots", "book_appointment"],
-    "response_contains": ["book"],
+    "response_contains": ["confirmed"],
     "forbidden_tools": [],
     "expected_args": {"book_appointment": {"patient_id": 1}}
   },
