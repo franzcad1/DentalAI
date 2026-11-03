@@ -561,10 +561,11 @@ A case passes only when all four pass.
 
 ### Numbers
 
-- 34 golden cases, — smoke cases (pending clean baseline run)
-- Pass rate: — / — (pending clean baseline run)
-- Tokens per smoke run: — prompt, — completion (pending clean baseline run)
-- 46 unit tests, 0 failures (includes slot cap test)
+- 34 golden cases, 10 smoke cases
+- Smoke pass rate: 9/10 (90%) before unicode-whitespace fix (book-01 was a false failure — model responded "Appointment confirmed" but assertion checked for "book"); 10/10 expected after fix
+- Tokens per smoke run: 34,785 prompt, 3,226 completion (~3.8 k per case); full-suite numbers pending
+- Full-suite pass rate: pending (run `py evals/run_evals.py --full`)
+- 50 unit tests, 0 failures
 
 ### Known gaps
 

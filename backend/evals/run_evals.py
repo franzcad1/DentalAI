@@ -31,9 +31,11 @@ Exit codes:
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import traceback
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -89,11 +91,24 @@ def check_tool_order(expected: List[str], called: List[str]) -> bool:
     return idx == len(expected)
 
 
+def _normalize_ws(s: str) -> str:
+    """Replace Unicode space separators (U+00A0, U+202F, etc.) with plain space.
+
+    Models sometimes emit narrow no-break spaces (U+202F) in formatted output
+    (e.g. "Patient 1", "28 days").  Normalising before comparison prevents
+    false failures when response_contains phrases use plain spaces.
+    """
+    out = []
+    for ch in s:
+        out.append(" " if unicodedata.category(ch) == "Zs" else ch)
+    return re.sub(r" {2,}", " ", "".join(out))
+
+
 def check_response_text(required_phrases: List[str], response: str) -> bool:
     if not required_phrases:
         return True
-    lower = response.lower()
-    return all(p.lower() in lower for p in required_phrases)
+    normalized = _normalize_ws(response).lower()
+    return all(_normalize_ws(p).lower() in normalized for p in required_phrases)
 
 
 def check_forbidden_tools(forbidden: List[str], called: List[str]) -> bool:
@@ -328,7 +343,7 @@ def save_results(scored: List[Dict[str, Any]]) -> None:
         "total_completion_tokens": sum(s.get("completion_tokens", 0) for s in scored),
         "cases": scored,
     }
-    RESULTS_FILE.write_text(json.dumps(payload, indent=2))
+    RESULTS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"\n  Results saved to {RESULTS_FILE}")
 
 
@@ -337,6 +352,13 @@ def save_results(scored: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # On Windows the default console encoding (cp1252) drops emoji as "?".
+    if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Run DentalAI agent evals")
     parser.add_argument("--category", help="Run only cases in this category")
     parser.add_argument("--fail-under", type=int, default=80,
@@ -418,8 +440,7 @@ def main() -> None:
             merged = [c for cid, c in prev_results.items() if cid not in existing]
             merged.extend(scored)
             scored = merged
-        import re as _re
-        _wait = _re.search(r"try again in\s+([\d]+m\s*[\d]+s|[\d]+\s*minutes?|[\d]+\s*seconds?)", e.provider_msg, _re.I)
+        _wait = re.search(r"try again in\s+([\d]+m\s*[\d]+s|[\d]+\s*minutes?|[\d]+\s*seconds?)", e.provider_msg, re.I)
         _wait_str = f"retry in ~{_wait.group(1)}" if _wait else "retry later"
         print(f"\n  DAILY LIMIT reached — {_wait_str}. Partial results saved.")
         print("  Note: earlier runs in the last 24 h still count against your quota.")
