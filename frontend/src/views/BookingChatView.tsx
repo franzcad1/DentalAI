@@ -37,6 +37,28 @@ interface Message {
   retryStatus?: RetryStatus
 }
 
+// ─── Slot-table quick-reply helper ────────────────────────────────────────────
+
+/**
+ * If `content` contains a markdown table whose first column header is "#",
+ * return the row numbers (1-10) found in the data rows so the UI can render
+ * clickable quick-reply buttons.  Returns null when no such table exists.
+ */
+function extractSlotNumbers(content: string): number[] | null {
+  const lines = content.split('\n')
+  const headerIdx = lines.findIndex((l) => /^\|\s*#\s*\|/.test(l))
+  if (headerIdx === -1) return null
+  const nums: number[] = []
+  for (let i = headerIdx + 2; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line.startsWith('|')) break
+    const first = line.split('|')[1]?.trim() ?? ''
+    const n = parseInt(first, 10)
+    if (!isNaN(n) && n >= 1 && n <= 10) nums.push(n)
+  }
+  return nums.length > 0 ? nums : null
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ToolCallPanel({ calls }: { calls: AgentToolCall[] }) {
@@ -153,8 +175,20 @@ function LoadingIndicator({ startedAt, retryStatus }: { startedAt: Date; retrySt
   )
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({
+  msg,
+  onSend,
+  isDisabled,
+}: {
+  msg: Message
+  onSend?: (text: string) => void
+  isDisabled?: boolean
+}) {
   const isUser = msg.role === 'user'
+  const slotNumbers =
+    !isUser && !msg.isLoading && !msg.error && onSend
+      ? extractSlotNumbers(msg.content)
+      : null
 
   return (
     <div className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
@@ -211,6 +245,23 @@ function MessageBubble({ msg }: { msg: Message }) {
         {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
           <div className="ml-1 w-full max-w-full">
             <ToolCallPanel calls={msg.toolCalls} />
+          </div>
+        )}
+
+        {/* Slot quick-reply buttons */}
+        {slotNumbers && (
+          <div className="mt-2 ml-1 flex flex-wrap gap-1.5">
+            {slotNumbers.map((n) => (
+              <button
+                key={n}
+                onClick={() => onSend!(String(n))}
+                disabled={isDisabled}
+                className="h-7 min-w-[1.75rem] rounded-full border border-accent/50 bg-accent/10 px-2.5 text-xs font-medium text-accent hover:bg-accent hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {n}
+              </button>
+            ))}
+            <span className="self-center text-[10px] text-slate-500 ml-0.5">tap a slot #</span>
           </div>
         )}
 
@@ -543,7 +594,12 @@ export function BookingChatView() {
 
           {/* Messages */}
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              onSend={sendMessage}
+              isDisabled={isLoading}
+            />
           ))}
           <div ref={bottomRef} />
         </div>
