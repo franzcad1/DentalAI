@@ -28,5 +28,40 @@ def test_normalize_does_not_make_wrong_response_pass():
     """Normalization must not cause a genuinely wrong response to pass."""
     from evals.run_evals import check_response_text
 
-    # Response has "Dr. Jones" (with U+202F); expectation is "Dr. Smith" — must fail.
+    # Response has "Dr. Jones"; expectation is "Dr. Smith" -- must fail.
     assert not check_response_text(["Dr. Smith"], "Dr. Jones confirmed your appointment")
+
+
+# ---------------------------------------------------------------------------
+# is_size_error -- 400 vs 413 discrimination
+# ---------------------------------------------------------------------------
+
+class _FakeExc(Exception):
+    """Minimal stand-in for Groq's BadRequestError (carries status_code)."""
+    def __init__(self, status_code: int, message: str = ""):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def test_is_size_error_false_for_status_400():
+    """HTTP 400 (bad tool-call JSON) must NOT be treated as a size error."""
+    from evals.run_evals import is_size_error
+    assert not is_size_error(_FakeExc(400, "bad request"))
+
+
+def test_is_size_error_true_for_status_413():
+    """HTTP 413 via status_code attribute must be detected as a size error."""
+    from evals.run_evals import is_size_error
+    assert is_size_error(_FakeExc(413, "request too large"))
+
+
+def test_is_size_error_true_for_runtime_error_413_text():
+    """RuntimeError wrapping a real 413 (as agent.py re-raises it) must be detected."""
+    from evals.run_evals import is_size_error
+    assert is_size_error(RuntimeError("413 Request too large: some details"))
+
+
+def test_is_size_error_false_for_plain_runtime_error():
+    """A RuntimeError without '413' in its message must not be treated as a size error."""
+    from evals.run_evals import is_size_error
+    assert not is_size_error(RuntimeError("invalid tool call arguments"))

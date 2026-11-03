@@ -1356,9 +1356,15 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     clear_retry_status(session_id)
                     raise
             except _groq_mod.BadRequestError as exc:
-                # 413 Request Too Large — do not retry
                 clear_retry_status(session_id)
-                raise RuntimeError(f"413 Request too large: {exc}") from exc
+                # Re-raise as a labelled RuntimeError only for true 413s so the
+                # eval harness can detect them by text (RuntimeError has no
+                # status_code).  Any other 4xx (e.g. bad tool-call JSON → 400)
+                # is re-raised as-is so is_size_error() sees status_code=400
+                # and correctly returns False, counting it as an agent failure.
+                if getattr(exc, "status_code", None) == 413:
+                    raise RuntimeError(f"413 Request too large: {exc}") from exc
+                raise
             except Exception:
                 clear_retry_status(session_id)
                 raise
