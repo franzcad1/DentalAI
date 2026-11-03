@@ -40,12 +40,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# Capture shell-set DATABASE_URL before .env overwrites it, then load .env.
-# We use this flag in main() to decide whether to force eval.db.
-# ---------------------------------------------------------------------------
-_DB_URL_FROM_SHELL: bool = "DATABASE_URL" in os.environ
-
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent.parent / ".env")
@@ -380,12 +374,11 @@ def main() -> None:
         print("Set it in backend/.env or export it before running.")
         sys.exit(2)
 
-    # Use eval.db unless DATABASE_URL was explicitly set in the shell
-    # (e.g. CI sets it at the job level).  A value that came only from
-    # .env is treated as a dev-DB pointer and overridden here so local
-    # runs never write bookings/cancels into dentalai.db.
-    if args.reseed or not _DB_URL_FROM_SHELL:
-        os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
+    # Always use eval.db — never the dev database.
+    # Both shell exports and .env may point at dentalai.db; ignore both.
+    # The app reads DATABASE_URL at import time (session.py line 8), so
+    # this must be set before "from app.agent.agent import run_agent" below.
+    os.environ["DATABASE_URL"] = "sqlite:///./eval.db"
 
     from app.agent.agent import run_agent as _run_agent
     global run_agent
