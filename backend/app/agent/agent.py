@@ -196,6 +196,7 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
         # Exclude slots whose start time is at or after 17:00 (nothing can finish by 5 PM)
         slots = [s for s in slots if s.start_time.hour < 17]
 
+        total_available = len(slots)
         result = []
         for s in slots[:10]:
             provider = db.get(Provider, s.provider_id)
@@ -215,6 +216,13 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
 
         if not result:
             return "No available slots found for the requested date range and provider."
+        if total_available > 10:
+            return json.dumps({
+                "slots": result,
+                "truncated": True,
+                "total": total_available,
+                "note": f"Showing first 10 of {total_available} slots. Narrow the date range to see more.",
+            })
         return json.dumps(result)
     finally:
         db.close()
@@ -1246,7 +1254,7 @@ def _get_client() -> Groq:
                 "GROQ_API_KEY is not set. Add it to backend/.env and restart."
             )
         _groq_client = Groq(api_key=api_key)
-        logger.info("[AGENT] Groq client initialised (model=llama-3.1-8b-instant)")
+        logger.info("[AGENT] Groq client initialised (model=openai/gpt-oss-20b)")
     return _groq_client
 
 

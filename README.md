@@ -514,7 +514,7 @@ Hand-written initial migration capturing all 8 tables. Written manually rather t
 | File | Tests | What it covers |
 |------|-------|----------------|
 | `test_logging.py` | 24 | JSON structure, request ID, PHI redaction across all formats |
-| `test_agent_tools.py` | 20 | Agent tool functions via in-memory SQLite fixture |
+| `test_agent_tools.py` | 20 | Agent tool functions via in-memory SQLite fixture (21 after M2 adds token-budget and slot-cap tests) |
 | `test_health.py` | 2 | App startup, health endpoint, patients endpoint |
 
 Key isolation decisions:
@@ -545,7 +545,7 @@ Key isolation decisions:
 
 ### What was built
 
-**34 golden eval cases** across 11 categories (scheduling, booking, recalls, outreach, patient-context, search, appointments, cancel, delete, modify, multi-step, refusal). Each case specifies: input prompt, expected tool sequence (as a subsequence), `response_contains` strings, `forbidden_tools`, and optional `expected_args` with exact argument values.
+**34 golden eval cases** across 13 categories (scheduling, booking, recalls, outreach, patient-context, search, appointments, cancel, delete, modify, reschedule, change-provider, multi-step, refusal). Each case specifies: input prompt, expected tool sequence (as a subsequence), `response_contains` strings, `forbidden_tools`, and optional `expected_args` with exact argument values.
 
 **Scorer** checks four independent signals per case:
 1. All expected tools called (in order, as a subsequence of actual calls)
@@ -557,7 +557,7 @@ A case passes only when all four pass.
 
 **Free-tier compatibility** — three changes to survive Groq's rate limits:
 - `check_available_slots` capped at 10 results (was 50) — eliminates 413 "Request Too Large" errors on date-range queries
-- 413 is caught as `BadRequestError` and excluded from the pass-rate denominator (infra error, not agent error)
+- 413 is caught when `status_code == 413` — Groq 1.7.0 raises `BadRequestError` for any HTTP 4xx, so text-only matching would misclassify a bad-JSON 400 as a size error and silently exclude it from the denominator
 - 429 retries with `Retry-After` header; daily token limit raises `DailyLimitStop`, saves partial results, exits 5
 
 **Token accounting** — every case records `prompt_tokens` and `completion_tokens`; the summary prints totals so you can track free-tier burn.
@@ -566,16 +566,21 @@ A case passes only when all four pass.
 
 **System-prompt fix for numeric patient IDs** — model was calling `search_patients` for "patient 1" (treating the number as a name). Added explicit clarification: a numeric patient ID means `patient_id` directly; do not call `search_patients`.
 
+**System-prompt change — confirm-before-booking removed** — the instruction asking the model to confirm before booking was removed to reduce per-call token usage. Eval cases in the booking category are phrased as explicit user confirmations to compensate (e.g., "Go ahead and confirm it, no need to ask me."). This shifts the confirmation responsibility from the agent to the caller; a production deployment should add a UI confirmation step instead.
+
 ### Numbers
 
-- 34 golden cases, 10 smoke cases
-- Smoke pass rate: 9/10 (90%) before unicode-whitespace fix (book-01 was a false failure — model responded "Appointment confirmed" but assertion checked for "book"); 10/10 expected after fix
-- Tokens per smoke run: 34,785 prompt, 3,226 completion (~3.8 k per case); full-suite numbers pending
+- 34 golden cases, 10 smoke cases, 13 categories
+- Smoke pass rate: 9/10 (90%) before unicode-whitespace fix; 10/10 expected after fix
+- book-01 assertion adjusted post-run: `response_contains` changed from `["book"]` to `["confirmed"]` after the first measured run showed the model says "Appointment confirmed" (not "book") — this was a calibration after observation, not a pre-registered expectation
+- Tokens per smoke run: 34,785 prompt, 3,226 completion (~3.8 k per case, measured from the smoke run); full-suite numbers pending
+- Token budget test (`test_agent_fixed_overhead_within_budget`) uses `chars // 4` as a drift guard — catches large regressions but is not a precise token count; exact counts require a live run
 - Full-suite pass rate: pending (run `py evals/run_evals.py --full`)
-- 50 unit tests, 0 failures
+- 50 unit tests, 0 failures (M1: 46; M2 added 3 in `test_eval_harness.py` + 1 in `test_agent_tools.py`)
 
 ### Known gaps
 
 - book-01/book-03 may still fail if the model ignores the numeric-ID system-prompt fix — verify with a clean run
+- `get_patient_context` still returns `dob`; `email` and `phone` were removed as PHI fields. `dob` is retained for clinical context (age verification, recall scheduling) — this is a capability trade-off, not a complete privacy fix. A future milestone should add logging-layer redaction for `dob` (Ontario PHIPA requires it)
 - `--only-missing` merges results by case ID; if a case was partially scored it is re-run
 - No latency budget per case yet

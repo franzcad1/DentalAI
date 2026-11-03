@@ -139,7 +139,14 @@ def is_provider_error(exc: Exception) -> bool:
 
 
 def is_size_error(exc: Exception) -> bool:
-    """True when the request was rejected as too large (HTTP 413)."""
+    """True when the request was rejected as too large (HTTP 413).
+
+    Groq 1.7.0 raises BadRequestError for *any* HTTP 4xx (not just 413),
+    so we check status_code first to avoid misclassifying a bad-JSON 400
+    as a size error and silently excluding it from the denominator.
+    """
+    if hasattr(exc, "status_code"):
+        return exc.status_code == 413
     msg = str(exc).lower()
     return any(kw in msg for kw in ("413", "request too large", "request entity too large", "payload too large"))
 
