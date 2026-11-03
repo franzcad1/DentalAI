@@ -455,9 +455,16 @@ dentalai/
 ```bash
 cd backend
 
-# All unit tests (no API key needed)
-python -m pytest tests/test_agent_tools.py tests/test_logging.py tests/test_health.py -v
+# All offline unit tests (no API key needed) — use this for routine runs
+py -m pytest tests --ignore=tests/test_agent_e2e.py
+
+# End-to-end tests (live Groq API, consumes quota, isolated e2e_test.db)
+# dentalai.db is never touched; e2e_test.db is deleted on teardown
+py -m pytest tests/test_agent_e2e.py -v -s
 ```
+
+The e2e file is marked `@pytest.mark.e2e` and is excluded from CI.
+Tests in it are also skipped automatically when `GROQ_API_KEY` is not set.
 
 ## Running Evals
 
