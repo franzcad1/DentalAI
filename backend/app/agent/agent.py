@@ -173,17 +173,7 @@ def _parse_date(s: str) -> date:
 
 @tool
 def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) -> str:
-    """Return all unbooked appointment slots between date_from and date_to.
-
-    Args:
-        date_from:   Start date (inclusive) in YYYY-MM-DD format.
-        date_to:     End date (inclusive) in YYYY-MM-DD format.
-        provider_id: Optional provider filter. Pass 0 to search all providers.
-
-    Returns:
-        JSON-encoded list of available slots with slot_id, provider_id,
-        provider_name, location_id, start_time, and end_time.
-    """
+    """Return unbooked slots in [date_from, date_to] (YYYY-MM-DD). provider_id=0 means any provider."""
     d_from = _parse_date(date_from)
     d_to = _parse_date(date_to)
 
@@ -206,8 +196,9 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
         # Exclude slots whose start time is at or after 17:00 (nothing can finish by 5 PM)
         slots = [s for s in slots if s.start_time.hour < 17]
 
+        total_available = len(slots)
         result = []
-        for s in slots[:50]:
+        for s in slots[:10]:
             provider = db.get(Provider, s.provider_id)
             provider_name = (
                 f"Dr. {provider.first_name} {provider.last_name}"
@@ -217,9 +208,7 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
             result.append(
                 {
                     "slot_id": s.id,
-                    "provider_id": s.provider_id,
                     "provider_name": provider_name,
-                    "location_id": s.location_id,
                     "start_time": s.start_time.isoformat(),
                     "end_time": s.end_time.isoformat(),
                 }
@@ -227,7 +216,14 @@ def check_available_slots(date_from: str, date_to: str, provider_id: int = 0) ->
 
         if not result:
             return "No available slots found for the requested date range and provider."
-        return json.dumps(result, indent=2)
+        if total_available > 10:
+            return json.dumps({
+                "slots": result,
+                "truncated": True,
+                "total": total_available,
+                "note": f"Showing first 10 of {total_available} slots. Narrow the date range to see more.",
+            })
+        return json.dumps(result)
     finally:
         db.close()
 
@@ -239,18 +235,7 @@ def book_appointment(
     appointment_type_id: int,
     notes: str = "",
 ) -> str:
-    """Book an appointment for a patient using a specific available slot.
-
-    Args:
-        patient_id:           ID of the patient to book for.
-        slot_id:              ID of the AvailableSlot to reserve.
-        appointment_type_id:  ID of the appointment type (cleaning, exam, etc.).
-        notes:                Optional clinical or scheduling notes.
-
-    Returns:
-        Confirmation string with the new appointment_id and key details,
-        or an error message if the slot is already taken.
-    """
+    """Book a patient into an available slot. Verifies the slot is free, enforces 5 PM close, fires booking event."""
     db = SessionLocal()
     try:
         slot = db.get(AvailableSlot, slot_id)
@@ -343,16 +328,7 @@ def book_appointment(
 
 @tool
 def get_patient_context(patient_id: int) -> str:
-    """Retrieve a full context summary for a patient.
-
-    Includes demographics, their most recent appointment, and current recall status.
-
-    Args:
-        patient_id: The patient's ID.
-
-    Returns:
-        JSON object with keys: patient, last_appointment, recall.
-    """
+    """Return a patient summary: demographics, most recent appointment, and current recall status."""
     db = SessionLocal()
     try:
         patient = db.get(Patient, patient_id)
@@ -393,10 +369,8 @@ def get_patient_context(patient_id: int) -> str:
             today = datetime.utcnow().date()
             days_overdue = (today - recall.due_date).days
             recall_data = {
-                "recall_id": recall.id,
                 "recall_type": recall.recall_type,
                 "due_date": str(recall.due_date),
-                "status": recall.status,
                 "days_overdue": days_overdue if days_overdue > 0 else 0,
             }
 
@@ -406,13 +380,10 @@ def get_patient_context(patient_id: int) -> str:
                     "id": patient.id,
                     "name": f"{patient.first_name} {patient.last_name}",
                     "dob": str(patient.dob) if patient.dob else None,
-                    "email": patient.email,
-                    "phone": patient.phone,
                 },
                 "last_appointment": last_appt_data,
                 "recall": recall_data,
-            },
-            indent=2,
+            }
         )
     finally:
         db.close()
@@ -420,14 +391,7 @@ def get_patient_context(patient_id: int) -> str:
 
 @tool
 def get_recall_queue() -> str:
-    """Return all patients with pending overdue recalls, most overdue first.
-
-    Only includes recalls whose due_date is strictly in the past and status
-    is still 'pending'. Sorted by days_overdue descending.
-
-    Returns:
-        JSON list with patient_id, name, recall_type, due_date, days_overdue.
-    """
+    """Return all patients with overdue pending recalls, most overdue first."""
     db = SessionLocal()
     try:
         today = datetime.utcnow().date()
@@ -459,22 +423,14 @@ def get_recall_queue() -> str:
                 }
             )
         result.sort(key=lambda x: x["days_overdue"], reverse=True)
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         db.close()
 
 
 @tool
 def search_patients(name: str) -> str:
-    """Search for patients by first or last name (case-insensitive, partial match).
-
-    Args:
-        name: Full or partial patient name to search for.
-
-    Returns:
-        JSON list of matching patients with id, name, dob, email, and phone.
-        Returns an error message if no matches are found.
-    """
+    """Search patients by first or last name (case-insensitive partial match). Returns up to 10 matches."""
     db = SessionLocal()
     try:
         parts = name.strip().split()
@@ -513,17 +469,8 @@ def search_patients(name: str) -> str:
             )
         if not patients:
             return f"No patients found matching '{name}'."
-        result = [
-            {
-                "id": p.id,
-                "name": f"{p.first_name} {p.last_name}",
-                "dob": str(p.dob) if p.dob else None,
-                "email": p.email,
-                "phone": p.phone,
-            }
-            for p in patients
-        ]
-        return json.dumps(result, indent=2)
+        result = [{"id": p.id, "name": f"{p.first_name} {p.last_name}"} for p in patients]
+        return json.dumps(result)
     finally:
         db.close()
 
@@ -536,18 +483,7 @@ def add_patient(
     email: str = "",
     phone: str = "",
 ) -> str:
-    """Add a new patient to the practice.
-
-    Args:
-        first_name: Patient's first name.
-        last_name:  Patient's last name.
-        dob:        Date of birth in YYYY-MM-DD format (optional).
-        email:      Email address (optional).
-        phone:      Phone number (optional).
-
-    Returns:
-        Confirmation string with the new patient's ID and name.
-    """
+    """Add a new patient. dob in YYYY-MM-DD format; email and phone are optional."""
     db = SessionLocal()
     try:
         from app.models.orm import Patient as PatientModel
@@ -575,41 +511,21 @@ def add_patient(
 
 @tool
 def list_all_patients() -> str:
-    """Return a list of all patients in the practice.
-
-    Returns:
-        JSON list of patients with id, name, dob, email, and phone.
-    """
+    """Return all patients sorted by last name."""
     db = SessionLocal()
     try:
         patients = db.query(Patient).order_by(Patient.last_name, Patient.first_name).all()
         if not patients:
             return "No patients found in the system."
-        result = [
-            {
-                "id": p.id,
-                "name": f"{p.first_name} {p.last_name}",
-                "dob": str(p.dob) if p.dob else None,
-                "email": p.email,
-                "phone": p.phone,
-            }
-            for p in patients
-        ]
-        return json.dumps(result, indent=2)
+        result = [{"id": p.id, "name": f"{p.first_name} {p.last_name}"} for p in patients]
+        return json.dumps(result)
     finally:
         db.close()
 
 
 @tool
 def list_patients_by_provider(provider_name: str) -> str:
-    """Return all patients who have had at least one appointment with a specific provider.
-
-    Args:
-        provider_name: Full or partial provider name (e.g. "Lopez", "Dr. Smith").
-
-    Returns:
-        JSON list of patients with their most recent appointment date with that provider.
-    """
+    """Return patients who have had at least one appointment with the given provider (partial name match)."""
     db = SessionLocal()
     try:
         term = f"%{provider_name.strip().replace('Dr.', '').strip()}%"
@@ -647,22 +563,14 @@ def list_patients_by_provider(provider_name: str) -> str:
         if not result:
             return f"No patients found with appointments for '{provider_name}'."
         result.sort(key=lambda x: x["name"])
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         db.close()
 
 
 @tool
 def get_patient_appointments(patient_id: int, days_ahead: int = 14) -> str:
-    """Return upcoming and recent appointments for a specific patient.
-
-    Args:
-        patient_id: The patient's ID.
-        days_ahead: How many days into the future to look (default 14).
-
-    Returns:
-        JSON list of appointments sorted by date, with provider, type, status.
-    """
+    """Return a patient's appointments: past 30 days plus next days_ahead days (default 14)."""
     db = SessionLocal()
     try:
         today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -689,26 +597,15 @@ def get_patient_appointments(patient_id: int, days_ahead: int = 14) -> str:
                 "provider": f"Dr. {provider.first_name} {provider.last_name}" if provider else "Unknown",
                 "type": appt_type.name if appt_type else "Unknown",
                 "status": a.status,
-                "notes": a.notes or "",
             })
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         db.close()
 
 
 @tool
 def get_appointments_for_date(date: str) -> str:
-    """Return all booked appointments for a specific date.
-
-    Args:
-        date: The date to query in YYYY-MM-DD format (e.g. "2026-10-22").
-              Understands relative terms like "today" or "tomorrow" if passed
-              as an ISO date resolved by the caller.
-
-    Returns:
-        JSON list of appointments with patient name, provider name, type,
-        start time, end time, and status.
-    """
+    """Return all booked appointments for a specific date (YYYY-MM-DD)."""
     d = _parse_date(date)
     db = SessionLocal()
     try:
@@ -734,30 +631,16 @@ def get_appointments_for_date(date: str) -> str:
                 "provider": f"Dr. {provider.first_name} {provider.last_name}" if provider else "Unknown",
                 "type": appt_type.name if appt_type else "Unknown",
                 "start_time": a.start_time.isoformat(),
-                "end_time": a.end_time.isoformat(),
                 "status": a.status,
-                "notes": a.notes or "",
             })
-        return json.dumps(result, indent=2)
+        return json.dumps(result)
     finally:
         db.close()
 
 
 @tool
 def draft_recall_message(patient_id: int) -> str:
-    """Draft a personalised recall outreach message for a patient.
-
-    Tone escalates with how overdue the recall is:
-      ≤30 days  → gentle reminder
-      31-90 days → moderate nudge
-      >90 days  → urgent outreach
-
-    Args:
-        patient_id: The patient's ID.
-
-    Returns:
-        A plain-text recall message ready to be sent by SMS or email.
-    """
+    """Draft a personalised recall outreach message. Tone escalates with days overdue (≤30 gentle, 31-90 moderate, >90 urgent)."""
     db = SessionLocal()
     try:
         patient = db.get(Patient, patient_id)
@@ -832,17 +715,7 @@ def draft_recall_message(patient_id: int) -> str:
 
 @tool
 def delete_appointment(appointment_id: int) -> str:
-    """Permanently delete an appointment from the system.
-
-    Use this when the user explicitly asks to delete or remove an appointment.
-    This cannot be undone. The associated slot is freed (is_booked = False).
-
-    Args:
-        appointment_id: The ID of the appointment to delete.
-
-    Returns:
-        Confirmation string, or an error if the appointment is not found.
-    """
+    """Permanently delete an appointment and free its slot. Use for 'delete' or 'remove' requests."""
     db = SessionLocal()
     try:
         appt = db.get(Appointment, appointment_id)
@@ -873,14 +746,7 @@ def delete_appointment(appointment_id: int) -> str:
 
 @tool
 def cancel_appointment(appointment_id: int) -> str:
-    """Cancel an existing appointment by setting its status to 'cancelled'.
-
-    Args:
-        appointment_id: The ID of the appointment to cancel.
-
-    Returns:
-        Confirmation string, or an error if the appointment is not found.
-    """
+    """Set appointment status to 'cancelled' (record kept). Use for 'cancel' requests."""
     db = SessionLocal()
     try:
         appt = db.get(Appointment, appointment_id)
@@ -911,31 +777,7 @@ def modify_appointment(
     new_status: Optional[str] = None,
     new_notes: Optional[str] = None,
 ) -> str:
-    """Modify any aspect of an existing appointment in one call.
-
-    Can change provider, time slot, appointment type, patient, status, and/or notes.
-    All parameters are optional — pass only the ones you want to change.
-
-    When changing the provider (new_provider_id) without a new_slot_id, the tool
-    tries to keep the same date and time.  If that conflicts, it returns an error
-    with the provider's name so you can call check_available_slots and try again
-    with a new_slot_id.
-
-    When changing the time (new_slot_id), the tool enforces the 5 PM closing time
-    and checks for overlapping appointments.
-
-    Args:
-        appointment_id:         The ID of the appointment to modify.
-        new_provider_id:        New provider (optional).
-        new_slot_id:            New AvailableSlot ID for a time/provider change (optional).
-        new_appointment_type_id: New appointment type ID (optional).
-        new_patient_id:         New patient ID (optional).
-        new_status:             New status — confirmed, completed, pending, no_show, cancelled (optional).
-        new_notes:              New notes string (optional).
-
-    Returns:
-        A summary of every field that changed, or an error message.
-    """
+    """Edit any field of an appointment in one call (provider, slot, type, patient, status, notes). Pass only the fields to change. To reschedule, call check_available_slots first then pass new_slot_id."""
     valid_statuses = {"confirmed", "completed", "pending", "no_show", "cancelled"}
     if new_status and new_status not in valid_statuses:
         return f"Error: '{new_status}' is not a valid status. Choose from: {', '.join(sorted(valid_statuses))}."
@@ -1348,6 +1190,9 @@ def _build_openai_schemas() -> List[Dict[str, Any]]:
         # Ensure 'properties' exists for tools with no required args
         params.setdefault("properties", {})
         params.setdefault("type", "object")
+        # Strip auto-generated title fields from each property (redundant with param names)
+        for prop in params["properties"].values():
+            prop.pop("title", None)
         schemas.append(
             {
                 "type": "function",
@@ -1368,62 +1213,29 @@ OPENAI_TOOL_SCHEMAS = _build_openai_schemas()
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = (
-    "You are DentalAI, an intelligent scheduling and recall assistant for a dental practice. "
-    "You are ONLY able to help with dental practice management tasks. "
-    "If the user asks about anything unrelated to dental scheduling, patients, recalls, or practice operations, "
-    "politely decline and redirect them: 'I'm DentalAI — I can only help with dental practice tasks like "
-    "scheduling, patient lookups, recalls, and appointment management.'\n\n"
-    "You have access to the practice's live appointment system and patient records. Use your tools to:\n"
-    "- Search for patients by name using search_patients — always do this first when a patient name is mentioned\n"
-    "- Add a new patient using add_patient\n"
-    "- List all patients in the practice using list_all_patients\n"
-    "- List patients seen by a specific provider using list_patients_by_provider\n"
-    "- Look up a patient's upcoming/recent appointments using get_patient_appointments — use this when asked if a specific patient has an appointment\n"
-    "- Look up all booked appointments for a day using get_appointments_for_date\n"
-    "- Find open appointment slots for patients\n"
-    "- Book appointments when asked (confirm patient name and time before finalising)\n"
-    "- Permanently delete an appointment using delete_appointment(appointment_id) — use when the user says 'delete', 'remove', or 'get rid of'\n"
-    "- Cancel an appointment (keeps the record) using cancel_appointment(appointment_id) — use when the user says 'cancel'\n"
-    "- Modify any aspect of an appointment using modify_appointment(appointment_id, ...) — "
-    "use this for ALL appointment edits: changing provider, time/slot, type, patient, status, or notes. "
-    "Pass only the fields you want to change. It enforces office hours and checks for overlaps automatically.\n"
-    "  • Change provider only: modify_appointment(id, new_provider_id=X) — keeps same time if no conflict\n"
-    "  • Reschedule: modify_appointment(id, new_slot_id=X) — use check_available_slots first to find the slot\n"
-    "  • Change type: modify_appointment(id, new_appointment_type_id=X)\n"
-    "  • Change status: modify_appointment(id, new_status='confirmed'|'completed'|'pending'|'no_show'|'cancelled')\n"
-    "  • Multiple changes at once: modify_appointment(id, new_provider_id=X, new_slot_id=Y, new_status='confirmed')\n"
-    "- Retrieve patient history and recall status\n"
-    "- Identify overdue patients who need outreach\n"
-    "- Draft personalised recall messages\n\n"
-    f"Today's date is {datetime.utcnow().strftime('%Y-%m-%d')}. "
-    f"Available appointment slots exist from today through {(datetime.utcnow() + timedelta(days=27)).strftime('%Y-%m-%d')} (28 days). "
-    f"When the user says 'today', 'tomorrow', 'yesterday', or a weekday name, resolve it to a YYYY-MM-DD date before calling tools.\n\n"
-    "IMPORTANT — out-of-range dates:\n"
-    "If the user asks for a date beyond the 28-day slot window, do NOT call check_available_slots. "
-    "Instead, immediately tell the user: 'I can only see availability for the next 28 days (through <end date>). "
-    "That date is outside my scheduling window.'\n\n"
-    "IMPORTANT — patient appointment lookups:\n"
-    "When asked whether a patient has an appointment (e.g. 'does X have an appointment this week'), "
-    "search for the patient first, then call get_patient_appointments with their patient_id. "
-    "NEVER call get_appointments_for_date repeatedly for each day — that wastes iterations.\n\n"
-    "IMPORTANT — office hours:\n"
-    "The practice closes at 5:00 PM. Never book or suggest a slot whose appointment end time would exceed 17:00. "
-    "If a user requests a late slot and the appointment type's duration would push past 5:00 PM, "
-    "tell them the latest available start time for that duration instead.\n\n"
+    "You are DentalAI, a dental practice scheduling assistant. "
+    "Only help with dental practice tasks (scheduling, patients, recalls, appointments). "
+    "Politely decline anything else.\n\n"
+    "Tool usage rules:\n"
+    "- Patient names: call search_patients first. "
+    "Exception: 'patient 1', 'patient 3', numeric IDs — use patient_id directly, never call search_patients.\n"
+    "- Patient appointment checks: use get_patient_appointments(patient_id), "
+    "not get_appointments_for_date per day.\n"
+    "- 'delete'/'remove' → delete_appointment. 'cancel' → cancel_appointment.\n"
+    "- All edits and reschedules: use modify_appointment. "
+    "To reschedule: call check_available_slots first, then pass new_slot_id.\n"
+    "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n\n"
+    f"Today: {datetime.utcnow().strftime('%Y-%m-%d')}. "
+    f"Slots available through {(datetime.utcnow() + timedelta(days=27)).strftime('%Y-%m-%d')} (28 days). "
+    "Resolve relative dates (today/tomorrow/weekday names) to YYYY-MM-DD before calling tools.\n\n"
+    "IMPORTANT — out-of-range dates: if the requested date is beyond the 28-day window, "
+    "do NOT call check_available_slots — tell the user the date is outside the scheduling window.\n\n"
+    "IMPORTANT — office hours: practice closes at 5 PM. "
+    "Never book a slot whose end time exceeds 17:00.\n\n"
     "IMPORTANT — booking flow:\n"
-    "1. When you present a numbered list of slots, mentally keep the slot_id for each number.\n"
-    "2. When the user picks a slot by number (e.g. '#3' or 'option 2'), DO NOT call check_available_slots again.\n"
-    "   Use the slot_id from your earlier tool result directly in book_appointment.\n"
-    "3. Re-querying changes slot ordering and causes the wrong slot to be booked.\n"
-    "4. For appointment_type_id, use 1 (Cleaning) unless the user specifies otherwise.\n\n"
-    "When discussing appointment times, use a human-friendly format like "
-    "'Monday, June 3 at 10:00 AM'. If a tool returns an error, explain it clearly "
-    "and suggest alternatives.\n\n"
-    "Formatting rules:\n"
-    "- NEVER include raw HTML tags like <br> in your responses. Use markdown line breaks or tables.\n"
-    "- When presenting patient info, use a clean markdown table with 'Detail' and 'Information' columns.\n"
-    "- Format dates as 'Month Day, Year' (e.g. 'March 26, 1968'), not ISO format.\n"
-    "- Format appointment times as 'Day, Month Date at HH:MM AM/PM'."
+    "1. After presenting a slot list, keep each slot_id mapped to its list number.\n"
+    "2. When the user picks a slot by number, use that slot_id directly in book_appointment — "
+    "do NOT re-query check_available_slots (re-querying changes ordering and books the wrong slot).\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -1442,7 +1254,7 @@ def _get_client() -> Groq:
                 "GROQ_API_KEY is not set. Add it to backend/.env and restart."
             )
         _groq_client = Groq(api_key=api_key)
-        logger.info("[AGENT] Groq client initialised (model=llama-3.1-8b-instant)")
+        logger.info("[AGENT] Groq client initialised (model=openai/gpt-oss-20b)")
     return _groq_client
 
 
@@ -1496,6 +1308,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     )
 
     tool_call_log: List[Dict[str, Any]] = []
+    _tokens: Dict[str, int] = {"prompt": 0, "completion": 0}
 
     def _parse_retry_wait(exc_str: str) -> float:
         """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
@@ -1520,6 +1333,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     temperature=0,
                 )
                 clear_retry_status(session_id)
+                if result.usage:
+                    _tokens["prompt"] += result.usage.prompt_tokens or 0
+                    _tokens["completion"] += result.usage.completion_tokens or 0
                 return result
             except _groq_mod.RateLimitError as exc:
                 wait = _parse_retry_wait(str(exc))
@@ -1539,6 +1355,16 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 else:
                     clear_retry_status(session_id)
                     raise
+            except _groq_mod.BadRequestError as exc:
+                clear_retry_status(session_id)
+                # Re-raise as a labelled RuntimeError only for true 413s so the
+                # eval harness can detect them by text (RuntimeError has no
+                # status_code).  Any other 4xx (e.g. bad tool-call JSON → 400)
+                # is re-raised as-is so is_size_error() sees status_code=400
+                # and correctly returns False, counting it as an agent failure.
+                if getattr(exc, "status_code", None) == 413:
+                    raise RuntimeError(f"413 Request too large: {exc}") from exc
+                raise
             except Exception:
                 clear_retry_status(session_id)
                 raise
@@ -1629,4 +1455,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
         len(final_answer),
     )
 
-    return {"response": final_answer, "tool_calls": tool_call_log}
+    return {
+        "response": final_answer,
+        "tool_calls": tool_call_log,
+        "prompt_tokens": _tokens["prompt"],
+        "completion_tokens": _tokens["completion"],
+    }
