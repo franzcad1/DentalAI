@@ -1,0 +1,111 @@
+{
+ "_note": "Synthetic questions labelled with the document that answers them. Unanswerable ones are not covered by any document.",
+ "answerable": [
+  {
+   "question": "How much notice do I have to give to cancel?",
+   "source": "cancellation-policy"
+  },
+  {
+   "question": "What do you charge if I skip my appointment without calling?",
+   "source": "cancellation-policy"
+  },
+  {
+   "question": "Can I move my appointment to later today?",
+   "source": "cancellation-policy"
+  },
+  {
+   "question": "Does my insurance get billed directly by you?",
+   "source": "insurance-and-billing"
+  },
+  {
+   "question": "Do you take Manulife?",
+   "source": "insurance-and-billing"
+  },
+  {
+   "question": "Can I get a quote before a big treatment?",
+   "source": "insurance-and-billing"
+  },
+  {
+   "question": "Can I pay for a $900 treatment in installments?",
+   "source": "payment-plans"
+  },
+  {
+   "question": "Can I pay with a cheque?",
+   "source": "payment-plans"
+  },
+  {
+   "question": "What do I need to bring to my first appointment?",
+   "source": "new-patient-visit"
+  },
+  {
+   "question": "How long will my first visit take?",
+   "source": "new-patient-visit"
+  },
+  {
+   "question": "I get really nervous at the dentist, can you help?",
+   "source": "new-patient-visit"
+  },
+  {
+   "question": "How often should I come in for a cleaning?",
+   "source": "cleaning-and-checkup"
+  },
+  {
+   "question": "How long is a regular teeth cleaning?",
+   "source": "cleaning-and-checkup"
+  },
+  {
+   "question": "How long will my mouth stay numb after a filling?",
+   "source": "fillings-and-crowns"
+  },
+  {
+   "question": "How many visits does a crown need?",
+   "source": "fillings-and-crowns"
+  },
+  {
+   "question": "What should I avoid eating with a temporary crown?",
+   "source": "fillings-and-crowns"
+  },
+  {
+   "question": "I have a terrible toothache, can I be seen today?",
+   "source": "emergencies"
+  },
+  {
+   "question": "My adult tooth fell out, what do I do?",
+   "source": "emergencies"
+  },
+  {
+   "question": "My face is swollen and I have a fever",
+   "source": "emergencies"
+  },
+  {
+   "question": "Are you open on Saturdays?",
+   "source": "hours-and-location"
+  },
+  {
+   "question": "Is there parking and is the clinic wheelchair accessible?",
+   "source": "hours-and-location"
+  },
+  {
+   "question": "How much is professional teeth whitening?",
+   "source": "whitening-and-cosmetic"
+  },
+  {
+   "question": "When should my toddler have their first dentist visit?",
+   "source": "childrens-dentistry"
+  },
+  {
+   "question": "Can I get a copy of my x-rays?",
+   "source": "privacy-and-records"
+  },
+  {
+   "question": "Who can you share my health information with?",
+   "source": "privacy-and-records"
+  }
+ ],
+ "unanswerable": [
+  "How much does a root canal cost?",
+  "Do you offer braces or Invisalign?",
+  "Can I have sedation or be put under for a wisdom tooth removal?",
+  "Is there a pharmacy near the clinic?"
+ ]
+}

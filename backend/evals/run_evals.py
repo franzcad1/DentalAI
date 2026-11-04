@@ -15,7 +15,11 @@ Each case checks:
   5. Arg checks      — required argument values appear in at least one
                        call to the target tool
 
-A case passes only when all five checks pass.
+Optional case fields: `response_excludes` (phrases that must NOT appear, used
+to catch invented answers) and `requires: "rag"` (case is skipped unless
+RAG_DATABASE_URL and COHERE_API_KEY are set).
+
+A case passes only when all checks pass.
 Provider errors (rate limits, network failures) are counted separately
 and excluded from the pass-rate denominator so infra noise cannot fail CI.
 
@@ -105,6 +109,22 @@ def check_response_text(required_phrases: List[str], response: str) -> bool:
     return all(_normalize_ws(p).lower() in normalized for p in required_phrases)
 
 
+def check_response_excludes(excluded_phrases: List[str], response: str) -> bool:
+    """True when none of the excluded phrases appear (used to catch invented answers)."""
+    if not excluded_phrases:
+        return True
+    normalized = _normalize_ws(response).lower()
+    return not any(_normalize_ws(p).lower() in normalized for p in excluded_phrases)
+
+
+def filter_unavailable(cases: List[Dict[str, Any]], rag_configured: bool):
+    """Drop cases that need RAG when it is not configured. Returns (kept, skipped)."""
+    if rag_configured:
+        return cases, []
+    kept = [c for c in cases if c.get("requires") != "rag"]
+    return kept, [c for c in cases if c.get("requires") == "rag"]
+
+
 def check_forbidden_tools(forbidden: List[str], called: List[str]) -> bool:
     if not forbidden:
         return True
@@ -168,10 +188,11 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     coverage = check_tool_coverage(expected, called)
     order = check_tool_order(expected, called)
     text = check_response_text(phrases, result.get("response", ""))
+    excl_ok = check_response_excludes(case.get("response_excludes", []), result.get("response", ""))
     no_forbidden = check_forbidden_tools(forbidden, called)
     args_ok = check_expected_args(exp_args, result)
 
-    passed = coverage and order and text and no_forbidden and args_ok
+    passed = coverage and order and text and excl_ok and no_forbidden and args_ok
     return {
         "id": case["id"],
         "category": case["category"],
@@ -185,6 +206,7 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
             "tool_coverage": coverage,
             "tool_order": order,
             "response_text": text,
+            "response_excludes": excl_ok,
             "no_forbidden_tools": no_forbidden,
             "expected_args": args_ok,
         },
@@ -226,6 +248,7 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
                     "tool_coverage": False,
                     "tool_order": False,
                     "response_text": False,
+                    "response_excludes": False,
                     "no_forbidden_tools": False,
                     "expected_args": False,
                 },
@@ -263,6 +286,8 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
         print(f"     tool_order FAIL — expected {outcome['expected_tools']}, got {outcome['actual_tools']}")
     if not checks["response_text"]:
         print(f"     response_text FAIL — snippet: {outcome['response_snippet']!r}")
+    if not checks.get("response_excludes", True):
+        print(f"     response_excludes FAIL — snippet: {outcome['response_snippet']!r}")
     if not checks["no_forbidden_tools"]:
         print(f"     forbidden_tools FAIL — snippet: {outcome['response_snippet']!r}")
     if not checks["expected_args"]:
@@ -404,6 +429,13 @@ def main() -> None:
     else:
         smoke = [c for c in all_cases if c.get("smoke")]
         cases = smoke if smoke else all_cases
+
+    from app.rag.retrieval import is_configured as _rag_configured
+
+    cases, skipped = filter_unavailable(cases, _rag_configured())
+    if skipped:
+        print(f"Skipping {len(skipped)} knowledge case(s): RAG not configured "
+              "(set RAG_DATABASE_URL and COHERE_API_KEY, then run ingest).")
 
     if args.category:
         cases = [c for c in cases if c["category"] == args.category]

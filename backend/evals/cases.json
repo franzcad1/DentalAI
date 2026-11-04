@@ -6,7 +6,7 @@
     "input": "What slots are available this week?",
     "expected_tools": ["check_available_slots"],
     "response_contains": [],
-    "forbidden_tools": ["book_appointment", "delete_appointment"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "search_clinic_docs"],
     "expected_args": {}
   },
   {
@@ -313,6 +313,68 @@
     "expected_tools": [],
     "response_contains": ["28"],
     "forbidden_tools": ["check_available_slots", "book_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-01",
+    "smoke": true,
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "What is the fee if I cancel my appointment late?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["$50"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-02",
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "Which insurance companies do you bill directly?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["Manulife"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-03",
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "How much is in-office teeth whitening?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["$450"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-04",
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "My adult tooth just got knocked out, what should I do?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["milk"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-05",
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "How much does a root canal cost?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "response_excludes": ["$"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {}
+  },
+  {
+    "id": "know-06",
+    "category": "knowledge",
+    "requires": "rag",
+    "input": "Are you open on weekends?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["closed"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
     "expected_args": {}
   }
 ]

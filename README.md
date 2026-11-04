@@ -476,7 +476,7 @@ cd backend
 # Smoke run (~10 cases, one per tool category) — default
 python evals/run_evals.py
 
-# Full suite (all 34 cases)
+# Full suite (all 40 cases, incl. 6 knowledge cases that need RAG configured)
 python evals/run_evals.py --full
 
 # Resume after a daily-limit stop
@@ -584,3 +584,71 @@ A case passes only when all four pass.
 - `get_patient_context` still returns `dob`; `email` and `phone` were removed as PHI fields. `dob` is retained for clinical context (age verification, recall scheduling) — this is a capability trade-off, not a complete privacy fix. A future milestone should add logging-layer redaction for `dob` (Ontario PHIPA requires it)
 - `--only-missing` merges results by case ID; if a case was partially scored it is re-run
 - No latency budget per case yet
+
+---
+
+## M3 — Clinic Knowledge (RAG)
+
+**Goal:** let the agent answer clinic policy, insurance, billing, procedure and hours questions from documents, cite the source, and say so when the documents do not cover a question. All documents are synthetic (a made-up clinic); no real patient or clinic data.
+
+### How it works
+
+```
+backend/app/rag/docs/*.md  ──chunk by section──▶  Cohere embeddings  ──▶  Postgres + pgvector (doc_chunks)
+                                                                                   │
+patient question ──▶ agent calls search_clinic_docs ──▶ embed question ──▶ top-k cosine search ──▶ drop below min score
+                                                                                   │
+                                           "[Source: <document title>] text"  ◀────┘   (or a fixed "no information found")
+```
+
+- **Corpus:** 11 short markdown documents (cancellation, insurance, payment plans, first visit, cleanings, fillings and crowns, emergencies, hours, whitening, children, privacy) → 36 chunks, one per section.
+- **Storage:** table `doc_chunks` (text, source, embedding `vector(1024)`, unique `content_hash`) in a Postgres database with the pgvector extension, hosted on Supabase's free tier. The rest of the app stays on SQLite. With this few rows the search is an exact scan; no approximate index is used.
+- **Embeddings:** Cohere `embed-english-v3.0` over HTTP, behind one function (`app/rag/embeddings.py`). Groq remains the chat model.
+- **Agent tool:** `search_clinic_docs(question)`. The system prompt tells the model to answer clinic questions only from the tool result, name the source, and otherwise say it does not have the information.
+- **Failure behaviour:** if `RAG_DATABASE_URL`/`COHERE_API_KEY` are missing, Supabase is paused or Cohere errors, the tool returns an "unavailable" message and the rest of the agent keeps working. Question text is never logged.
+
+### Setup
+
+1. Create a free Supabase project and a free Cohere trial key.
+2. In `backend/.env` set `RAG_DATABASE_URL` (Supabase **pooler** connection string) and `COHERE_API_KEY` (see `.env.example`).
+3. Load the documents once from your own machine (idempotent; re-running re-embeds only changed chunks and removes chunks that no longer exist):
+
+   ```bash
+   cd backend
+   python -m app.rag.ingest --dry-run   # chunk only, no keys needed
+   python -m app.rag.ingest --init      # create extension + table, embed, store
+   ```
+
+4. For the deployed backend, add the same two variables in the Render dashboard (`render.yaml` lists them as secrets). Ingest is never run on Render; the server only reads.
+
+Free Supabase projects pause after a period of inactivity; while paused the knowledge tool replies "unavailable".
+
+### Evaluation
+
+```bash
+cd backend
+python evals/run_retrieval_eval.py        # Cohere only, no Groq tokens: compares chunk granularity in memory
+python evals/run_retrieval_eval.py --pg   # scores the table that is actually deployed
+python evals/run_evals.py --full          # includes the 6 "knowledge" agent cases (skipped if RAG is not configured)
+```
+
+- **Retrieval eval:** 25 labelled questions (each tied to the document that answers it) and 4 questions no document covers. Reports hit@1, hit@4, MRR@10, and, for each minimum-similarity cut-off, how many answerable questions are still answered correctly versus how many unanswerable ones are rejected. The default cut-off (`RAG_MIN_SCORE=0.30`) is a placeholder until this output is read.
+- **Agent cases:** 6 new `knowledge` cases in the M2 harness check that the tool is called, the answer contains the key fact, booking tools are not called, and that an unanswerable question (root canal price) does not produce a price. `slot-01` now also forbids the knowledge tool, so booking questions are checked not to use it.
+- **Offline tests:** `tests/test_rag.py` covers the chunker, idempotent ingest, ranking and threshold with a fake embedder, the unavailable path, tool registration and the new harness checks. An extra test runs against a real Postgres with pgvector when `RAG_TEST_DATABASE_URL` points at a throwaway database.
+
+### Numbers
+
+Measured so far (no live Cohere or Supabase run yet):
+
+- Fixed prompt overhead (system prompt + tool schemas, `chars // 4` estimate from `evals/estimate_tokens.py`): about 1,923 → 2,097 tokens (+174, +9%) for the new tool and prompt lines. This is an estimate, not a live token count.
+- 73 tests pass offline (1 skipped without a Postgres URL); the pgvector store was also exercised against a local Postgres 16 with the pgvector extension.
+
+Pending real runs (will be filled in from actual output, not estimated): retrieval hit@1 / hit@4 / MRR, the chosen similarity cut-off, knowledge-case pass rate, smoke-set token change, and latency of a knowledge question on the deployed backend.
+
+### Known gaps
+
+- The corpus is small and synthetic, and thresholds are chosen from the same question set, so retrieval numbers will look better than they would on real documents.
+- No reranking, hybrid keyword search or approximate index; unnecessary at this size and deliberately left out.
+- The Cohere request shape is written from its public docs and has not yet run against the live API from this repo.
+- `psycopg2-binary` is the only new dependency; it has not been verified on 32-bit Python 3.8 on Windows.
+- Knowledge answers depend on the model following the prompt (call the tool, cite, do not invent); the `knowledge` cases measure this but do not guarantee it.

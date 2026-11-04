@@ -1157,6 +1157,14 @@ def change_appointment_provider(appointment_id: int, new_provider_id: int) -> st
 # Tool registry — maps name → callable and builds OpenAI function schemas
 # ---------------------------------------------------------------------------
 
+@tool
+def search_clinic_docs(question: str) -> str:
+    """Look up clinic policies, insurance, billing, procedures, hours. Answer only from the result and name the source."""
+    from app.rag.retrieval import lookup
+
+    return lookup(question)
+
+
 TOOLS = [
     search_patients,
     add_patient,
@@ -1172,6 +1180,7 @@ TOOLS = [
     get_patient_context,
     get_recall_queue,
     draft_recall_message,
+    search_clinic_docs,
 ]
 
 # {tool_name: callable}  — used to dispatch tool calls from the agent loop
@@ -1224,7 +1233,10 @@ _SYSTEM_PROMPT = (
     "- 'delete'/'remove' → delete_appointment. 'cancel' → cancel_appointment.\n"
     "- All edits and reschedules: use modify_appointment. "
     "To reschedule: call check_available_slots first, then pass new_slot_id.\n"
-    "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n\n"
+    "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n"
+    "- Clinic policy, insurance, billing, procedure or hours questions: call search_clinic_docs "
+    "and answer only from its text, naming the source. If it finds nothing, say you do not have "
+    "that information and suggest calling the office. Do not use it for booking.\n\n"
     f"Today: {datetime.utcnow().strftime('%Y-%m-%d')}. "
     f"Slots available through {(datetime.utcnow() + timedelta(days=27)).strftime('%Y-%m-%d')} (28 days). "
     "Resolve relative dates (today/tomorrow/weekday names) to YYYY-MM-DD before calling tools.\n\n"

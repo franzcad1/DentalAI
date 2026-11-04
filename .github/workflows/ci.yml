@@ -31,5 +31,5 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: python -m pytest tests/test_logging.py tests/test_agent_tools.py tests/test_health.py tests/test_eval_harness.py -v
+        run: python -m pytest tests/test_logging.py tests/test_agent_tools.py tests/test_health.py tests/test_eval_harness.py tests/test_rag.py -v
 
