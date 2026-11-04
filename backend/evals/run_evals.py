@@ -202,6 +202,7 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "size_error": False,
         "prompt_tokens": result.get("prompt_tokens", 0),
         "completion_tokens": result.get("completion_tokens", 0),
+        "tool_parse_retries": result.get("tool_parse_retries", 0),
         "checks": {
             "tool_coverage": coverage,
             "tool_order": order,
@@ -316,6 +317,9 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
         print(f"  Size errors / 413 (excluded): {len(size_errors)}")
     if errors:
         print(f"  Agent errors (counted as fail): {len(errors)}")
+    parse_retries = sum(s.get("tool_parse_retries", 0) for s in scored)
+    if parse_retries:
+        print(f"  Groq tool-call JSON retries used: {parse_retries}")
     total_pt = sum(s.get("prompt_tokens", 0) for s in scored)
     total_ct = sum(s.get("completion_tokens", 0) for s in scored)
     if total_pt or total_ct:

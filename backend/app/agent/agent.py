@@ -1275,6 +1275,20 @@ def _get_client() -> Groq:
 # ---------------------------------------------------------------------------
 
 
+# Groq sometimes rejects the model's own tool call with a 400 "Failed to parse
+# tool call arguments as JSON". It is intermittent, so a resample usually works.
+_TOOL_PARSE_RETRIES = 2
+_TOOL_PARSE_RETRY_TEMPERATURE = 0.3  # temperature 0 may repeat the same bad output
+
+
+def is_tool_parse_error(exc: BaseException) -> bool:
+    """True for Groq's 400 about malformed tool-call JSON (not for 413 or other 4xx)."""
+    return (
+        getattr(exc, "status_code", None) == 400
+        and "failed to parse tool call arguments" in str(exc).lower()
+    )
+
+
 def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     """Invoke the agent with a user message and return structured output.
 
@@ -1321,6 +1335,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     tool_call_log: List[Dict[str, Any]] = []
     _tokens: Dict[str, int] = {"prompt": 0, "completion": 0}
+    _parse_retries = [0]  # tool-call JSON retries used this turn (reported in the result)
 
     def _parse_retry_wait(exc_str: str) -> float:
         """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
@@ -1331,7 +1346,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
             return minutes * 60 + seconds
         return 30.0
 
-    def _chat_create_with_retry(msgs: List[ChatCompletionMessageParam]) -> Any:
+    def _chat_create_with_retry(
+        msgs: List[ChatCompletionMessageParam], temperature: float = 0
+    ) -> Any:
         """Call Groq with manual 429 retry so we can surface wait time to the frontend."""
         import groq as _groq_mod
         max_retries = 3
@@ -1342,7 +1359,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     messages=msgs,
                     tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
                     tool_choice="auto",
-                    temperature=0,
+                    temperature=temperature,
                 )
                 clear_retry_status(session_id)
                 if result.usage:
@@ -1381,8 +1398,27 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 clear_retry_status(session_id)
                 raise
 
+    def _chat_create_resilient(msgs: List[ChatCompletionMessageParam]) -> Any:
+        """Retry (resampled) when Groq rejects the model's tool-call JSON; the
+        429 handling stays inside _chat_create_with_retry. Message content is
+        never logged."""
+        for attempt in range(_TOOL_PARSE_RETRIES + 1):
+            try:
+                return _chat_create_with_retry(
+                    msgs, temperature=0 if attempt == 0 else _TOOL_PARSE_RETRY_TEMPERATURE
+                )
+            except Exception as exc:
+                if attempt < _TOOL_PARSE_RETRIES and is_tool_parse_error(exc):
+                    _parse_retries[0] += 1
+                    logger.warning(
+                        "[AGENT] Groq 400 tool-call JSON parse failure — retry %d/%d (session=%s)",
+                        attempt + 1, _TOOL_PARSE_RETRIES, session_id,
+                    )
+                    continue
+                raise
+
     for iteration in range(MAX_ITERATIONS):
-        response = _chat_create_with_retry(messages)
+        response = _chat_create_resilient(messages)
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
@@ -1472,4 +1508,5 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
         "tool_calls": tool_call_log,
         "prompt_tokens": _tokens["prompt"],
         "completion_tokens": _tokens["completion"],
+        "tool_parse_retries": _parse_retries[0],
     }

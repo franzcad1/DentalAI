@@ -671,6 +671,7 @@ Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
 - **Baseline on `main` (M2 code, no RAG tool), one run:** 9/10 (90%, 36,212 tokens). `book-01` also failed there, so that failure predates M3. `recall-01` and `multi-01` passed with no Groq 400s.
 - So the three Groq 400s on this branch against none on `main` is a suspicious difference, but it is three events in two runs against one baseline run: not enough to say the extra tool or prompt lines cause it. It needs repeat runs on both before the cause is claimed, and the agent loop does not retry this kind of 400 today.
 - Token totals are not directly comparable between runs because cases that error end early.
+- **Retry added (not yet measured live):** the agent now retries that specific Groq 400 up to 2 times, resampling at temperature 0.3 (temperature 0 may repeat the same malformed output). It is covered by offline tests with a fake Groq client; `run_evals.py` prints how many retries a run used. Whether it removes the errors on the real API is untested until the smoke set is run again.
 
 Pending: more repeat smoke runs on both branches (Groq's daily free-tier allowance limits how many per day), and latency of a knowledge question on the deployed backend.
 
