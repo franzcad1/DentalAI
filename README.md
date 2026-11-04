@@ -667,10 +667,12 @@ Other measurements:
 Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
 
 - **Knowledge cases (6):** 6/6 passed, 20,493 tokens (19,090 prompt, 1,403 completion).
-- **Smoke set (10 original cases + `know-01` = 11):** 9/11 passed (81%), 35,522 tokens. `book-01` failed (the agent listed slots but never called `book_appointment`; this case was already flaky in M2) and `multi-01` errored with a Groq 400 "Failed to parse tool call arguments as JSON". The token total is not comparable with the M2 10-case run (38,021) because two cases ended early.
-- Whether the new prompt lines affect `book-01` is not established from one run; it needs repeat runs and a baseline on `main`.
+- **Smoke set on this branch (10 original cases + `know-01` = 11), two runs:** 9/11 (81%, 35,522 tokens) and 8/11 (72%, 31,437 tokens; below the 80% gate). `book-01` failed both times (the agent lists slots but never calls `book_appointment`). Groq returned a 400 "Failed to parse tool call arguments as JSON" for `multi-01` in both runs and for `recall-01` in the second.
+- **Baseline on `main` (M2 code, no RAG tool), one run:** 9/10 (90%, 36,212 tokens). `book-01` also failed there, so that failure predates M3. `recall-01` and `multi-01` passed with no Groq 400s.
+- So the three Groq 400s on this branch against none on `main` is a suspicious difference, but it is three events in two runs against one baseline run: not enough to say the extra tool or prompt lines cause it. It needs repeat runs on both before the cause is claimed, and the agent loop does not retry this kind of 400 today.
+- Token totals are not directly comparable between runs because cases that error end early.
 
-Pending: repeat smoke runs, a `main` baseline for `book-01`, and latency of a knowledge question on the deployed backend.
+Pending: more repeat smoke runs on both branches (Groq's daily free-tier allowance limits how many per day), and latency of a knowledge question on the deployed backend.
 
 ### Known gaps
 
