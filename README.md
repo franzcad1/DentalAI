@@ -664,7 +664,13 @@ Other measurements:
 - Fixed prompt overhead (system prompt + tool schemas, `chars // 4` estimate from `evals/estimate_tokens.py`): about 1,923 to 2,097 tokens (+174, +9%). This is an estimate, not a live token count.
 - 73 tests pass offline (1 skipped without a Postgres URL); the pgvector store was also exercised against a local Postgres 16 with the pgvector extension.
 
-Pending real runs: knowledge-case pass rate, smoke-set token change, and latency of a knowledge question on the deployed backend.
+Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
+
+- **Knowledge cases (6):** 6/6 passed, 20,493 tokens (19,090 prompt, 1,403 completion).
+- **Smoke set (10 original cases + `know-01` = 11):** 9/11 passed (81%), 35,522 tokens. `book-01` failed (the agent listed slots but never called `book_appointment`; this case was already flaky in M2) and `multi-01` errored with a Groq 400 "Failed to parse tool call arguments as JSON". The token total is not comparable with the M2 10-case run (38,021) because two cases ended early.
+- Whether the new prompt lines affect `book-01` is not established from one run; it needs repeat runs and a baseline on `main`.
+
+Pending: repeat smoke runs, a `main` baseline for `book-01`, and latency of a knowledge question on the deployed backend.
 
 ### Known gaps
 
