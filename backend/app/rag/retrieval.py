@@ -15,9 +15,12 @@ from .store import Hit
 logger = logging.getLogger(__name__)
 
 DEFAULT_TOP_K = 4
-# Placeholder, NOT tuned. The retrieval eval prints hit/reject rates across
-# thresholds; set RAG_MIN_SCORE from that output.
-DEFAULT_MIN_SCORE = 0.30
+# Chosen from the first real retrieval eval run (see README, M3 Numbers): at 0.40
+# every labelled question is still answered correctly, while 0.50 starts losing
+# correct answers. A similarity cut-off alone does not separate unanswerable
+# questions (their top scores overlap the answerable range), so the model is
+# also told to say so when the retrieved text does not answer the question.
+DEFAULT_MIN_SCORE = 0.40
 
 NO_INFO = (
     "No relevant clinic information found. Tell the patient you do not have "

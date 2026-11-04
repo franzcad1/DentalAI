@@ -632,23 +632,43 @@ python evals/run_retrieval_eval.py --pg   # scores the table that is actually de
 python evals/run_evals.py --full          # includes the 6 "knowledge" agent cases (skipped if RAG is not configured)
 ```
 
-- **Retrieval eval:** 25 labelled questions (each tied to the document that answers it) and 4 questions no document covers. Reports hit@1, hit@4, MRR@10, and, for each minimum-similarity cut-off, how many answerable questions are still answered correctly versus how many unanswerable ones are rejected. The default cut-off (`RAG_MIN_SCORE=0.30`) is a placeholder until this output is read.
+- **Retrieval eval:** 25 labelled questions (each tied to the document that answers it) and 4 questions no document covers. Reports hit@1, hit@4, MRR@10, and, for each minimum-similarity cut-off, how many answerable questions are still answered correctly versus how many unanswerable ones are rejected. The default cut-off is `RAG_MIN_SCORE=0.40`, chosen from the numbers below.
 - **Agent cases:** 6 new `knowledge` cases in the M2 harness check that the tool is called, the answer contains the key fact, booking tools are not called, and that an unanswerable question (root canal price) does not produce a price. `slot-01` now also forbids the knowledge tool, so booking questions are checked not to use it.
 - **Offline tests:** `tests/test_rag.py` covers the chunker, idempotent ingest, ranking and threshold with a fake embedder, the unavailable path, tool registration and the new harness checks. An extra test runs against a real Postgres with pgvector when `RAG_TEST_DATABASE_URL` points at a throwaway database.
 
 ### Numbers
 
-Measured so far (no live Cohere or Supabase run yet):
+Measured on 2026-11-04 from real runs (Cohere `embed-english-v3.0`, Supabase pgvector; 25 answerable and 4 unanswerable synthetic questions; k = 4):
 
-- Fixed prompt overhead (system prompt + tool schemas, `chars // 4` estimate from `evals/estimate_tokens.py`): about 1,923 → 2,097 tokens (+174, +9%) for the new tool and prompt lines. This is an estimate, not a live token count.
+| Configuration | hit@1 | hit@4 | MRR@10 |
+|---|---|---|---|
+| One chunk per section (36 chunks, default) | 100% | 100% | 1.000 |
+| One chunk per document (11 chunks) | 96% | 100% | 0.980 |
+| Deployed pgvector table (36 rows) | 100% | 100% | 1.000 |
+
+The deployed table scored identically to the in-memory per-section run, and a second ingest embedded and inserted 0 rows (idempotent).
+
+Minimum-similarity cut-off, per-section chunks:
+
+| Min score | Answerable questions still answered | Unanswerable questions rejected |
+|---|---|---|
+| 0.30 | 100% | 0% |
+| 0.40 | 100% | 25% |
+| 0.50 | 88% | 75% |
+| 0.60 | 56% | 100% |
+
+The top similarity of the four unanswerable questions was 0.38 to 0.56, which overlaps the range of correct answers. So a cut-off alone cannot reliably reject questions the documents do not cover (and 4 questions is far too few to tune on). 0.40 was chosen because it loses no correct answers; refusing the rest depends on the model saying it does not have the information when the retrieved text does not answer, which the `knowledge` agent cases test.
+
+Other measurements:
+
+- Fixed prompt overhead (system prompt + tool schemas, `chars // 4` estimate from `evals/estimate_tokens.py`): about 1,923 to 2,097 tokens (+174, +9%). This is an estimate, not a live token count.
 - 73 tests pass offline (1 skipped without a Postgres URL); the pgvector store was also exercised against a local Postgres 16 with the pgvector extension.
 
-Pending real runs (will be filled in from actual output, not estimated): retrieval hit@1 / hit@4 / MRR, the chosen similarity cut-off, knowledge-case pass rate, smoke-set token change, and latency of a knowledge question on the deployed backend.
+Pending real runs: knowledge-case pass rate, smoke-set token change, and latency of a knowledge question on the deployed backend.
 
 ### Known gaps
 
-- The corpus is small and synthetic, and thresholds are chosen from the same question set, so retrieval numbers will look better than they would on real documents.
+- The corpus is small and synthetic, the questions were written by the same author as the documents, and the cut-off was chosen from the same question set, so retrieval numbers (100% hit@4) will look better than they would on real documents and real patient wording. The per-section versus per-document difference is one question out of 25, too small to call a real effect.
 - No reranking, hybrid keyword search or approximate index; unnecessary at this size and deliberately left out.
-- The Cohere request shape is written from its public docs and has not yet run against the live API from this repo.
-- `psycopg2-binary` is the only new dependency; it has not been verified on 32-bit Python 3.8 on Windows.
+- `psycopg2-binary` is the only new dependency; it installed and connected on 32-bit Python 3.8 on Windows (wheel `cp38-win32`).
 - Knowledge answers depend on the model following the prompt (call the tool, cite, do not invent); the `knowledge` cases measure this but do not guarantee it.
