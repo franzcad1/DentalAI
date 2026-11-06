@@ -678,7 +678,9 @@ Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
 - Token totals are not directly comparable between runs because cases that error end early.
 - **Retry added** (up to 2 retries, resampling at temperature 0.3), offline-tested with a fake Groq client. Two more smoke runs on the branch with the retry (2026-11-06): **9/11 (81%, 35,612 tokens)** and **10/11 (90%, 42,089 tokens)**. `book-01` failed both times, as on `main`. `multi-01` hit the Groq 400 in both runs; the retry rescued it in the second run (after 2 retries) and ran out in the first. `recall-01` passed both times. The "retries used" line counts only cases that finished, so retries spent on a case that still errored are not counted.
 - **Summary across runs:** `main`, 1 run: 9/10, no Groq 400s. This branch, 4 runs: 9/11, 8/11, 9/11, 10/11, with the 400 on `multi-01` in all four. That points to the new tool or prompt lines making malformed tool-call JSON more likely on `multi-01`, but with one baseline run it is not proven, and the retry only partly absorbs it. `book-01` is unrelated to M3 (it fails on `main` too).
-Pending: a `--repeat` option and a `main` baseline with more runs to settle whether M3 raises the `multi-01` 400 rate, and latency of a knowledge question on the deployed backend.
+- **Diagnosis (2026-11-06, `multi-01` x6 each):** with the knowledge tool: 3 pass, 3 error, 13 Groq 400s; with `--ablate rag`: 6/6 pass, 0 400s. Every rejected call was `{"name": "get_recall_queue", "arguments": {""}}`, a malformed empty-arguments block on the zero-argument tool. Fix: zero-argument tools now declare an explicit empty-object schema (`required: []`, `additionalProperties: false`) and the knowledge tool description is shorter. After the fix, `multi-01` x6: **6/6 pass, 0 Groq 400s** (38,230 tokens). Six runs is a small sample; the smoke set has not been rerun since the fix.
+
+Pending: smoke set rerun after the fix, and latency of a knowledge question on the deployed backend.
 
 ### Known gaps
 
