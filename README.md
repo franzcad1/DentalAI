@@ -476,11 +476,16 @@ cd backend
 # Smoke run (~10 cases, one per tool category) — default
 python evals/run_evals.py
 
-# Full suite (all 34 cases)
+# Full suite (all 40 cases, incl. 6 knowledge cases that need RAG configured)
 python evals/run_evals.py --full
 
 # Resume after a daily-limit stop
 python evals/run_evals.py --only-missing
+
+# Diagnosis helpers: run chosen cases N times (tally printed, results not saved),
+# optionally without the M3 knowledge tool and prompt line (pre-M3 behaviour)
+python evals/run_evals.py --only multi-01 --repeat 5
+python evals/run_evals.py --only multi-01 --repeat 5 --ablate rag
 
 # Gate at a custom pass rate
 python evals/run_evals.py --fail-under 85
@@ -584,3 +589,102 @@ A case passes only when all four pass.
 - `get_patient_context` still returns `dob`; `email` and `phone` were removed as PHI fields. `dob` is retained for clinical context (age verification, recall scheduling) — this is a capability trade-off, not a complete privacy fix. A future milestone should add logging-layer redaction for `dob` (Ontario PHIPA requires it)
 - `--only-missing` merges results by case ID; if a case was partially scored it is re-run
 - No latency budget per case yet
+
+---
+
+## M3 — Clinic Knowledge (RAG)
+
+**Goal:** let the agent answer clinic policy, insurance, billing, procedure and hours questions from documents, cite the source, and say so when the documents do not cover a question. All documents are synthetic (a made-up clinic); no real patient or clinic data.
+
+### How it works
+
+```
+backend/app/rag/docs/*.md  ──chunk by section──▶  Cohere embeddings  ──▶  Postgres + pgvector (doc_chunks)
+                                                                                   │
+patient question ──▶ agent calls search_clinic_docs ──▶ embed question ──▶ top-k cosine search ──▶ drop below min score
+                                                                                   │
+                                           "[Source: <document title>] text"  ◀────┘   (or a fixed "no information found")
+```
+
+- **Corpus:** 11 short markdown documents (cancellation, insurance, payment plans, first visit, cleanings, fillings and crowns, emergencies, hours, whitening, children, privacy) → 36 chunks, one per section.
+- **Storage:** table `doc_chunks` (text, source, embedding `vector(1024)`, unique `content_hash`) in a Postgres database with the pgvector extension, hosted on Supabase's free tier. The rest of the app stays on SQLite. With this few rows the search is an exact scan; no approximate index is used.
+- **Embeddings:** Cohere `embed-english-v3.0` over HTTP, behind one function (`app/rag/embeddings.py`). Groq remains the chat model.
+- **Agent tool:** `search_clinic_docs(question)`. The system prompt tells the model to answer clinic questions only from the tool result, name the source, and otherwise say it does not have the information.
+- **Failure behaviour:** if `RAG_DATABASE_URL`/`COHERE_API_KEY` are missing, Supabase is paused or Cohere errors, the tool returns an "unavailable" message and the rest of the agent keeps working. Question text is never logged.
+
+### Setup
+
+1. Create a free Supabase project and a free Cohere trial key.
+2. In `backend/.env` set `RAG_DATABASE_URL` (Supabase **pooler** connection string) and `COHERE_API_KEY` (see `.env.example`).
+3. Load the documents once from your own machine (idempotent; re-running re-embeds only changed chunks and removes chunks that no longer exist):
+
+   ```bash
+   cd backend
+   python -m app.rag.ingest --dry-run   # chunk only, no keys needed
+   python -m app.rag.ingest --init      # create extension + table, embed, store
+   ```
+
+4. For the deployed backend, add the same two variables in the Render dashboard (`render.yaml` lists them as secrets). Ingest is never run on Render; the server only reads.
+
+Free Supabase projects pause after a period of inactivity; while paused the knowledge tool replies "unavailable".
+
+### Evaluation
+
+```bash
+cd backend
+python evals/run_retrieval_eval.py        # Cohere only, no Groq tokens: compares chunk granularity in memory
+python evals/run_retrieval_eval.py --pg   # scores the table that is actually deployed
+python evals/run_evals.py --full          # includes the 6 "knowledge" agent cases (skipped if RAG is not configured)
+```
+
+- **Retrieval eval:** 25 labelled questions (each tied to the document that answers it) and 4 questions no document covers. Reports hit@1, hit@4, MRR@10, and, for each minimum-similarity cut-off, how many answerable questions are still answered correctly versus how many unanswerable ones are rejected. The default cut-off is `RAG_MIN_SCORE=0.40`, chosen from the numbers below.
+- **Agent cases:** 6 new `knowledge` cases in the M2 harness check that the tool is called, the answer contains the key fact, booking tools are not called, and that an unanswerable question (root canal price) does not produce a price. `slot-01` now also forbids the knowledge tool, so booking questions are checked not to use it.
+- **Offline tests:** `tests/test_rag.py` covers the chunker, idempotent ingest, ranking and threshold with a fake embedder, the unavailable path, tool registration and the new harness checks. An extra test runs against a real Postgres with pgvector when `RAG_TEST_DATABASE_URL` points at a throwaway database.
+
+### Numbers
+
+Measured on 2026-11-04 from real runs (Cohere `embed-english-v3.0`, Supabase pgvector; 25 answerable and 4 unanswerable synthetic questions; k = 4):
+
+| Configuration | hit@1 | hit@4 | MRR@10 |
+|---|---|---|---|
+| One chunk per section (36 chunks, default) | 100% | 100% | 1.000 |
+| One chunk per document (11 chunks) | 96% | 100% | 0.980 |
+| Deployed pgvector table (36 rows) | 100% | 100% | 1.000 |
+
+The deployed table scored identically to the in-memory per-section run, and a second ingest embedded and inserted 0 rows (idempotent).
+
+Minimum-similarity cut-off, per-section chunks:
+
+| Min score | Answerable questions still answered | Unanswerable questions rejected |
+|---|---|---|
+| 0.30 | 100% | 0% |
+| 0.40 | 100% | 25% |
+| 0.50 | 88% | 75% |
+| 0.60 | 56% | 100% |
+
+The top similarity of the four unanswerable questions was 0.38 to 0.56, which overlaps the range of correct answers. So a cut-off alone cannot reliably reject questions the documents do not cover (and 4 questions is far too few to tune on). 0.40 was chosen because it loses no correct answers; refusing the rest depends on the model saying it does not have the information when the retrieved text does not answer, which the `knowledge` agent cases test.
+
+Other measurements:
+
+- Fixed prompt overhead (system prompt + tool schemas, `chars // 4` estimate from `evals/estimate_tokens.py`): about 1,923 to 2,097 tokens (+174, +9%). This is an estimate, not a live token count.
+- 73 tests pass offline (1 skipped without a Postgres URL); the pgvector store was also exercised against a local Postgres 16 with the pgvector extension.
+
+Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
+
+- **Knowledge cases (6):** 6/6 passed, 20,493 tokens (19,090 prompt, 1,403 completion).
+- **Smoke set on this branch (10 original cases + `know-01` = 11), two runs:** 9/11 (81%, 35,522 tokens) and 8/11 (72%, 31,437 tokens; below the 80% gate). `book-01` failed both times (the agent lists slots but never calls `book_appointment`). Groq returned a 400 "Failed to parse tool call arguments as JSON" for `multi-01` in both runs and for `recall-01` in the second.
+- **Baseline on `main` (M2 code, no RAG tool), one run:** 9/10 (90%, 36,212 tokens). `book-01` also failed there, so that failure predates M3. `recall-01` and `multi-01` passed with no Groq 400s.
+- So the three Groq 400s on this branch against none on `main` is a suspicious difference, but it is three events in two runs against one baseline run: not enough to say the extra tool or prompt lines cause it. It needs repeat runs on both before the cause is claimed, and the agent loop does not retry this kind of 400 today.
+- Token totals are not directly comparable between runs because cases that error end early.
+- **Retry added** (up to 2 retries, resampling at temperature 0.3), offline-tested with a fake Groq client. Two more smoke runs on the branch with the retry (2026-11-06): **9/11 (81%, 35,612 tokens)** and **10/11 (90%, 42,089 tokens)**. `book-01` failed both times, as on `main`. `multi-01` hit the Groq 400 in both runs; the retry rescued it in the second run (after 2 retries) and ran out in the first. `recall-01` passed both times. The "retries used" line counts only cases that finished, so retries spent on a case that still errored are not counted.
+- **Summary across runs:** `main`, 1 run: 9/10, no Groq 400s. This branch, 4 runs: 9/11, 8/11, 9/11, 10/11, with the 400 on `multi-01` in all four. That points to the new tool or prompt lines making malformed tool-call JSON more likely on `multi-01`, but with one baseline run it is not proven, and the retry only partly absorbs it. `book-01` is unrelated to M3 (it fails on `main` too).
+- **Diagnosis (2026-11-06, `multi-01` x6 each):** with the knowledge tool: 3 pass, 3 error, 13 Groq 400s; with `--ablate rag`: 6/6 pass, 0 400s. Every rejected call was `{"name": "get_recall_queue", "arguments": {""}}`, a malformed empty-arguments block on the zero-argument tool. Fix: zero-argument tools now declare an explicit empty-object schema (`required: []`, `additionalProperties: false`) and the knowledge tool description is shorter. After the fix, `multi-01` x6: **6/6 pass, 0 Groq 400s** (38,230 tokens). Six runs is a small sample; the smoke set has not been rerun since the fix.
+
+Pending: smoke set rerun after the fix, and latency of a knowledge question on the deployed backend.
+
+### Known gaps
+
+- The corpus is small and synthetic, the questions were written by the same author as the documents, and the cut-off was chosen from the same question set, so retrieval numbers (100% hit@4) will look better than they would on real documents and real patient wording. The per-section versus per-document difference is one question out of 25, too small to call a real effect.
+- No reranking, hybrid keyword search or approximate index; unnecessary at this size and deliberately left out.
+- `psycopg2-binary` is the only new dependency; it installed and connected on 32-bit Python 3.8 on Windows (wheel `cp38-win32`).
+- Knowledge answers depend on the model following the prompt (call the tool, cite, do not invent); the `knowledge` cases measure this but do not guarantee it.

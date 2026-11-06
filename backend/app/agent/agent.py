@@ -1157,6 +1157,14 @@ def change_appointment_provider(appointment_id: int, new_provider_id: int) -> st
 # Tool registry — maps name → callable and builds OpenAI function schemas
 # ---------------------------------------------------------------------------
 
+@tool
+def search_clinic_docs(question: str) -> str:
+    """Look up clinic policies, insurance, billing, procedures, hours."""
+    from app.rag.retrieval import lookup
+
+    return lookup(question)
+
+
 TOOLS = [
     search_patients,
     add_patient,
@@ -1172,6 +1180,7 @@ TOOLS = [
     get_patient_context,
     get_recall_queue,
     draft_recall_message,
+    search_clinic_docs,
 ]
 
 # {tool_name: callable}  — used to dispatch tool calls from the agent loop
@@ -1193,6 +1202,11 @@ def _build_openai_schemas() -> List[Dict[str, Any]]:
         # Strip auto-generated title fields from each property (redundant with param names)
         for prop in params["properties"].values():
             prop.pop("title", None)
+        if not params["properties"]:
+            # Zero-argument tool: spell out the empty-object shape so the model copies
+            # `{}` instead of emitting malformed arguments (Groq 400 on get_recall_queue).
+            params["required"] = []
+            params["additionalProperties"] = False
         schemas.append(
             {
                 "type": "function",
@@ -1212,6 +1226,13 @@ OPENAI_TOOL_SCHEMAS = _build_openai_schemas()
 # System prompt
 # ---------------------------------------------------------------------------
 
+# Kept as its own constant so the eval harness can switch it off (--ablate rag).
+_CLINIC_PROMPT_LINE = (
+    "- Clinic policy, insurance, billing, procedure or hours questions: call search_clinic_docs "
+    "and answer only from its text, naming the source. If it finds nothing, say you do not have "
+    "that information and suggest calling the office. Do not use it for booking.\n"
+)
+
 _SYSTEM_PROMPT = (
     "You are DentalAI, a dental practice scheduling assistant. "
     "Only help with dental practice tasks (scheduling, patients, recalls, appointments). "
@@ -1224,7 +1245,9 @@ _SYSTEM_PROMPT = (
     "- 'delete'/'remove' → delete_appointment. 'cancel' → cancel_appointment.\n"
     "- All edits and reschedules: use modify_appointment. "
     "To reschedule: call check_available_slots first, then pass new_slot_id.\n"
-    "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n\n"
+    "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n"
+    + _CLINIC_PROMPT_LINE
+    + "\n"
     f"Today: {datetime.utcnow().strftime('%Y-%m-%d')}. "
     f"Slots available through {(datetime.utcnow() + timedelta(days=27)).strftime('%Y-%m-%d')} (28 days). "
     "Resolve relative dates (today/tomorrow/weekday names) to YYYY-MM-DD before calling tools.\n\n"
@@ -1261,6 +1284,23 @@ def _get_client() -> Groq:
 # ---------------------------------------------------------------------------
 # Public run function
 # ---------------------------------------------------------------------------
+
+
+# Groq sometimes rejects the model's own tool call with a 400 "Failed to parse
+# tool call arguments as JSON". It is intermittent, so a resample usually works.
+_TOOL_PARSE_RETRIES = 2
+# Counts every Groq 400 of this kind, including ones a retry later rescued
+# (the eval harness reads it to measure how often the model emits bad JSON).
+AGENT_STATS = {"tool_parse_errors": 0}
+_TOOL_PARSE_RETRY_TEMPERATURE = 0.3  # temperature 0 may repeat the same bad output
+
+
+def is_tool_parse_error(exc: BaseException) -> bool:
+    """True for Groq's 400 about malformed tool-call JSON (not for 413 or other 4xx)."""
+    return (
+        getattr(exc, "status_code", None) == 400
+        and "failed to parse tool call arguments" in str(exc).lower()
+    )
 
 
 def run_agent(message: str, session_id: str) -> Dict[str, Any]:
@@ -1309,6 +1349,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
     tool_call_log: List[Dict[str, Any]] = []
     _tokens: Dict[str, int] = {"prompt": 0, "completion": 0}
+    _parse_retries = [0]  # tool-call JSON retries used this turn (reported in the result)
 
     def _parse_retry_wait(exc_str: str) -> float:
         """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
@@ -1319,7 +1360,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
             return minutes * 60 + seconds
         return 30.0
 
-    def _chat_create_with_retry(msgs: List[ChatCompletionMessageParam]) -> Any:
+    def _chat_create_with_retry(
+        msgs: List[ChatCompletionMessageParam], temperature: float = 0
+    ) -> Any:
         """Call Groq with manual 429 retry so we can surface wait time to the frontend."""
         import groq as _groq_mod
         max_retries = 3
@@ -1330,7 +1373,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     messages=msgs,
                     tools=OPENAI_TOOL_SCHEMAS,  # type: ignore[arg-type]
                     tool_choice="auto",
-                    temperature=0,
+                    temperature=temperature,
                 )
                 clear_retry_status(session_id)
                 if result.usage:
@@ -1369,8 +1412,29 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 clear_retry_status(session_id)
                 raise
 
+    def _chat_create_resilient(msgs: List[ChatCompletionMessageParam]) -> Any:
+        """Retry (resampled) when Groq rejects the model's tool-call JSON; the
+        429 handling stays inside _chat_create_with_retry. Message content is
+        never logged."""
+        for attempt in range(_TOOL_PARSE_RETRIES + 1):
+            try:
+                return _chat_create_with_retry(
+                    msgs, temperature=0 if attempt == 0 else _TOOL_PARSE_RETRY_TEMPERATURE
+                )
+            except Exception as exc:
+                if is_tool_parse_error(exc):
+                    AGENT_STATS["tool_parse_errors"] += 1
+                if attempt < _TOOL_PARSE_RETRIES and is_tool_parse_error(exc):
+                    _parse_retries[0] += 1
+                    logger.warning(
+                        "[AGENT] Groq 400 tool-call JSON parse failure — retry %d/%d (session=%s)",
+                        attempt + 1, _TOOL_PARSE_RETRIES, session_id,
+                    )
+                    continue
+                raise
+
     for iteration in range(MAX_ITERATIONS):
-        response = _chat_create_with_retry(messages)
+        response = _chat_create_resilient(messages)
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
@@ -1460,4 +1524,5 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
         "tool_calls": tool_call_log,
         "prompt_tokens": _tokens["prompt"],
         "completion_tokens": _tokens["completion"],
+        "tool_parse_retries": _parse_retries[0],
     }

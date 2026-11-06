@@ -308,3 +308,88 @@ def test_list_all_patients_returns_both(agent_db):
     names = [p["name"] for p in result]
     assert "John Doe" in names
     assert "Jane Roe" in names
+
+
+# ---------------------------------------------------------------------------
+# Groq 400 "Failed to parse tool call arguments as JSON": bounded resample retry
+# ---------------------------------------------------------------------------
+
+def _groq_400(message: str, status: int = 400):
+    import groq
+    import httpx
+
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    response = httpx.Response(status, request=request)
+    return groq.BadRequestError(message, response=response, body=None)
+
+
+class _FakeCompletions:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.temperatures = []
+
+    def create(self, **kwargs):
+        self.temperatures.append(kwargs.get("temperature"))
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _fake_ok(text="all good"):
+    from types import SimpleNamespace as NS
+
+    message = NS(content=text, tool_calls=None)
+    return NS(
+        choices=[NS(finish_reason="stop", message=message)],
+        usage=NS(prompt_tokens=10, completion_tokens=2),
+    )
+
+
+def _run_with_fake_groq(monkeypatch, outcomes, session):
+    from types import SimpleNamespace as NS
+    import app.agent.agent as agent_mod
+
+    completions = _FakeCompletions(outcomes)
+    fake_client = NS(chat=NS(completions=completions))
+    monkeypatch.setattr(agent_mod, "_get_client", lambda: fake_client)
+    return completions, agent_mod.run_agent("hello", session_id=session)
+
+
+def test_is_tool_parse_error_only_matches_the_specific_400():
+    from app.agent.agent import is_tool_parse_error
+
+    assert is_tool_parse_error(_groq_400("Failed to parse tool call arguments as JSON"))
+    assert not is_tool_parse_error(_groq_400("some other bad request"))
+    assert not is_tool_parse_error(_groq_400("Failed to parse tool call arguments as JSON", status=413))
+    assert not is_tool_parse_error(RuntimeError("Failed to parse tool call arguments as JSON"))
+
+
+def test_tool_parse_400_is_retried_with_resample_then_succeeds(monkeypatch):
+    bad = _groq_400("Failed to parse tool call arguments as JSON")
+    completions, result = _run_with_fake_groq(monkeypatch, [bad, _fake_ok()], "retry-ok")
+    assert result["response"] == "all good"
+    assert result["tool_parse_retries"] == 1
+    assert completions.temperatures == [0, 0.3]
+
+
+def test_tool_parse_400_gives_up_after_bounded_retries(monkeypatch):
+    import groq
+    import pytest
+
+    bad = lambda: _groq_400("Failed to parse tool call arguments as JSON")  # noqa: E731
+    with pytest.raises(groq.BadRequestError):
+        _run_with_fake_groq(monkeypatch, [bad(), bad(), bad(), _fake_ok()], "retry-giveup")
+
+
+def test_other_400_is_not_retried(monkeypatch):
+    import groq
+    import pytest
+    from types import SimpleNamespace as NS
+    import app.agent.agent as agent_mod
+
+    completions = _FakeCompletions([_groq_400("invalid something else"), _fake_ok()])
+    monkeypatch.setattr(agent_mod, "_get_client", lambda: NS(chat=NS(completions=completions)))
+    with pytest.raises(groq.BadRequestError):
+        agent_mod.run_agent("hello", session_id="no-retry")
+    assert len(completions.temperatures) == 1

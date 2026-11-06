@@ -15,7 +15,11 @@ Each case checks:
   5. Arg checks      — required argument values appear in at least one
                        call to the target tool
 
-A case passes only when all five checks pass.
+Optional case fields: `response_excludes` (phrases that must NOT appear, used
+to catch invented answers) and `requires: "rag"` (case is skipped unless
+RAG_DATABASE_URL and COHERE_API_KEY are set).
+
+A case passes only when all checks pass.
 Provider errors (rate limits, network failures) are counted separately
 and excluded from the pass-rate denominator so infra noise cannot fail CI.
 
@@ -105,6 +109,62 @@ def check_response_text(required_phrases: List[str], response: str) -> bool:
     return all(_normalize_ws(p).lower() in normalized for p in required_phrases)
 
 
+def check_response_excludes(excluded_phrases: List[str], response: str) -> bool:
+    """True when none of the excluded phrases appear (used to catch invented answers)."""
+    if not excluded_phrases:
+        return True
+    normalized = _normalize_ws(response).lower()
+    return not any(_normalize_ws(p).lower() in normalized for p in excluded_phrases)
+
+
+def apply_ablation(agent_module: Any, mode: str) -> None:
+    """Make the agent behave like the pre-M3 agent for A/B diagnosis (process-local).
+
+    mode "rag": drop the search_clinic_docs tool schema and its system-prompt line.
+    """
+    if mode == "none":
+        return
+    if mode != "rag":
+        raise ValueError(f"unknown ablation: {mode}")
+    agent_module.OPENAI_TOOL_SCHEMAS = [
+        t for t in agent_module.OPENAI_TOOL_SCHEMAS
+        if t["function"]["name"] != "search_clinic_docs"
+    ]
+    agent_module._SYSTEM_PROMPT = agent_module._SYSTEM_PROMPT.replace(
+        agent_module._CLINIC_PROMPT_LINE, ""
+    )
+
+
+def select_cases(all_cases: List[Dict[str, Any]], only: Optional[str]) -> List[Dict[str, Any]]:
+    """--only ID[,ID...]: exactly those cases, in the given order. Unknown ids raise."""
+    if not only:
+        return all_cases
+    by_id = {c["id"]: c for c in all_cases}
+    ids = [i.strip() for i in only.split(",") if i.strip()]
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        raise ValueError(f"unknown case id(s): {', '.join(missing)}")
+    return [by_id[i] for i in ids]
+
+
+def failed_generation(exc: Exception) -> str:
+    """The model's rejected tool call text from a Groq 400 body, if present (eval-only)."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error", body)
+        if isinstance(err, dict):
+            return str(err.get("failed_generation") or "")
+    return ""
+
+
+def filter_unavailable(cases: List[Dict[str, Any]], rag_configured: bool):
+    """Drop cases that need RAG when it is not configured. Returns (kept, skipped)."""
+    if rag_configured:
+        return cases, []
+    kept = [c for c in cases if c.get("requires") != "rag"]
+    return kept, [c for c in cases if c.get("requires") == "rag"]
+
+
 def check_forbidden_tools(forbidden: List[str], called: List[str]) -> bool:
     if not forbidden:
         return True
@@ -168,10 +228,11 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     coverage = check_tool_coverage(expected, called)
     order = check_tool_order(expected, called)
     text = check_response_text(phrases, result.get("response", ""))
+    excl_ok = check_response_excludes(case.get("response_excludes", []), result.get("response", ""))
     no_forbidden = check_forbidden_tools(forbidden, called)
     args_ok = check_expected_args(exp_args, result)
 
-    passed = coverage and order and text and no_forbidden and args_ok
+    passed = coverage and order and text and excl_ok and no_forbidden and args_ok
     return {
         "id": case["id"],
         "category": case["category"],
@@ -181,10 +242,12 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "size_error": False,
         "prompt_tokens": result.get("prompt_tokens", 0),
         "completion_tokens": result.get("completion_tokens", 0),
+        "tool_parse_retries": result.get("tool_parse_retries", 0),
         "checks": {
             "tool_coverage": coverage,
             "tool_order": order,
             "response_text": text,
+            "response_excludes": excl_ok,
             "no_forbidden_tools": no_forbidden,
             "expected_args": args_ok,
         },
@@ -226,6 +289,7 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
                     "tool_coverage": False,
                     "tool_order": False,
                     "response_text": False,
+                    "response_excludes": False,
                     "no_forbidden_tools": False,
                     "expected_args": False,
                 },
@@ -242,6 +306,9 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
             )
             print(label)
             print(f"     {str(exc)[:120]}")
+            fg = failed_generation(exc)
+            if fg:
+                print(f"     failed_generation: {fg[:400]!r}")
             scored.append(outcome)
             if _stop_daily:
                 raise DailyLimitStop(scored, str(exc))
@@ -263,6 +330,8 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
         print(f"     tool_order FAIL — expected {outcome['expected_tools']}, got {outcome['actual_tools']}")
     if not checks["response_text"]:
         print(f"     response_text FAIL — snippet: {outcome['response_snippet']!r}")
+    if not checks.get("response_excludes", True):
+        print(f"     response_excludes FAIL — snippet: {outcome['response_snippet']!r}")
     if not checks["no_forbidden_tools"]:
         print(f"     forbidden_tools FAIL — snippet: {outcome['response_snippet']!r}")
     if not checks["expected_args"]:
@@ -291,6 +360,9 @@ def print_summary(scored: List[Dict[str, Any]], fail_under: int) -> int:
         print(f"  Size errors / 413 (excluded): {len(size_errors)}")
     if errors:
         print(f"  Agent errors (counted as fail): {len(errors)}")
+    parse_retries = sum(s.get("tool_parse_retries", 0) for s in scored)
+    if parse_retries:
+        print(f"  Groq tool-call JSON retries used: {parse_retries}")
     total_pt = sum(s.get("prompt_tokens", 0) for s in scored)
     total_ct = sum(s.get("completion_tokens", 0) for s in scored)
     if total_pt or total_ct:
@@ -352,6 +424,50 @@ def save_results(scored: List[Dict[str, Any]]) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def run_repeat(cases: List[Dict[str, Any]], args: Any, agent_module: Any) -> int:
+    """Run the selected cases args.repeat times; print a per-case tally. Not saved."""
+    label = f"ablate={args.ablate}"
+    print(f"\nDentalAI Eval Harness — repeat x{args.repeat} ({label}), {len(cases)} case(s)\n")
+    tally: Dict[str, Dict[str, int]] = {}
+    tokens = 0
+    start_400s = agent_module.AGENT_STATS["tool_parse_errors"]
+    for rep_no in range(1, args.repeat + 1):
+        print(f"--- repetition {rep_no}/{args.repeat}")
+        if args.reseed:
+            from app.db.seed import run_seed
+            run_seed()
+        try:
+            scored = run_cases(cases, delay=args.delay)
+        except DailyLimitStop as e:
+            print("\n  DAILY LIMIT reached — stopping early; tally below is partial.")
+            scored = e.partial
+            _accumulate(tally, scored)
+            tokens += sum(s.get("prompt_tokens", 0) + s.get("completion_tokens", 0) for s in scored)
+            break
+        _accumulate(tally, scored)
+        tokens += sum(s.get("prompt_tokens", 0) + s.get("completion_tokens", 0) for s in scored)
+    n400 = agent_module.AGENT_STATS["tool_parse_errors"] - start_400s
+    print("\n" + "=" * 56)
+    print(f"  Repeat tally ({label})")
+    for cid, t in tally.items():
+        print(f"  {cid:<14} pass={t['pass']} fail={t['fail']} error={t['error']}")
+    print(f"  Groq tool-call JSON 400s seen (incl. rescued by retry): {n400}")
+    print(f"  Tokens (completed calls only): {tokens:,}")
+    print("=" * 56)
+    return 0
+
+
+def _accumulate(tally: Dict[str, Dict[str, int]], scored: List[Dict[str, Any]]) -> None:
+    for s in scored:
+        t = tally.setdefault(s["id"], {"pass": 0, "fail": 0, "error": 0})
+        if s.get("errored"):
+            t["error"] += 1
+        elif s["passed"]:
+            t["pass"] += 1
+        else:
+            t["fail"] += 1
+
+
 def main() -> None:
     # On Windows the default console encoding (cp1252) drops emoji as "?".
     if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -374,6 +490,11 @@ def main() -> None:
                         help="Run all cases; default runs only smoke-tagged cases")
     parser.add_argument("--only-missing", action="store_true",
                         help="Skip cases that already have a completed result in latest.json")
+    parser.add_argument("--only", help="Run only these case ids (comma-separated), ignoring the smoke filter")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="Run the selected cases N times and print a per-case tally (results are not saved)")
+    parser.add_argument("--ablate", choices=["none", "rag"], default="none",
+                        help="rag = run without the knowledge tool and its prompt line (pre-M3 behaviour)")
     args = parser.parse_args()
 
     if not os.getenv("GROQ_API_KEY"):
@@ -390,6 +511,8 @@ def main() -> None:
     from app.agent.agent import run_agent as _run_agent
     global run_agent
     run_agent = _run_agent
+    import app.agent.agent as _agent_module
+    apply_ablation(_agent_module, args.ablate)
 
     if args.reseed:
         from app.db.seed import run_seed
@@ -398,12 +521,25 @@ def main() -> None:
 
     all_cases = json.loads(CASES_FILE.read_text())
 
+    if args.only:
+        try:
+            cases = select_cases(all_cases, args.only)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            sys.exit(3)
     # --full runs everything; default runs only smoke-tagged cases
-    if args.full:
+    elif args.full:
         cases = all_cases
     else:
         smoke = [c for c in all_cases if c.get("smoke")]
         cases = smoke if smoke else all_cases
+
+    from app.rag.retrieval import is_configured as _rag_configured
+
+    cases, skipped = filter_unavailable(cases, _rag_configured())
+    if skipped:
+        print(f"Skipping {len(skipped)} knowledge case(s): RAG not configured "
+              "(set RAG_DATABASE_URL and COHERE_API_KEY, then run ingest).")
 
     if args.category:
         cases = [c for c in cases if c["category"] == args.category]
@@ -425,6 +561,9 @@ def main() -> None:
             print("All cases already complete — nothing to run.")
             sys.exit(0)
         print(f"Resuming: {len(done_ids)} done, {len(cases)} remaining")
+
+    if args.repeat > 1:
+        sys.exit(run_repeat(cases, args, _agent_module))
 
     suite_label = "full" if args.full else f"smoke ({len(cases)} cases)"
     print(f"\nDentalAI Eval Harness — {suite_label}")
