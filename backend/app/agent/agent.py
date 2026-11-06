@@ -1159,7 +1159,7 @@ def change_appointment_provider(appointment_id: int, new_provider_id: int) -> st
 
 @tool
 def search_clinic_docs(question: str) -> str:
-    """Look up clinic policies, insurance, billing, procedures, hours. Answer only from the result and name the source."""
+    """Look up clinic policies, insurance, billing, procedures, hours."""
     from app.rag.retrieval import lookup
 
     return lookup(question)
@@ -1202,6 +1202,11 @@ def _build_openai_schemas() -> List[Dict[str, Any]]:
         # Strip auto-generated title fields from each property (redundant with param names)
         for prop in params["properties"].values():
             prop.pop("title", None)
+        if not params["properties"]:
+            # Zero-argument tool: spell out the empty-object shape so the model copies
+            # `{}` instead of emitting malformed arguments (Groq 400 on get_recall_queue).
+            params["required"] = []
+            params["additionalProperties"] = False
         schemas.append(
             {
                 "type": "function",
