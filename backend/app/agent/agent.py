@@ -1221,6 +1221,13 @@ OPENAI_TOOL_SCHEMAS = _build_openai_schemas()
 # System prompt
 # ---------------------------------------------------------------------------
 
+# Kept as its own constant so the eval harness can switch it off (--ablate rag).
+_CLINIC_PROMPT_LINE = (
+    "- Clinic policy, insurance, billing, procedure or hours questions: call search_clinic_docs "
+    "and answer only from its text, naming the source. If it finds nothing, say you do not have "
+    "that information and suggest calling the office. Do not use it for booking.\n"
+)
+
 _SYSTEM_PROMPT = (
     "You are DentalAI, a dental practice scheduling assistant. "
     "Only help with dental practice tasks (scheduling, patients, recalls, appointments). "
@@ -1234,9 +1241,8 @@ _SYSTEM_PROMPT = (
     "- All edits and reschedules: use modify_appointment. "
     "To reschedule: call check_available_slots first, then pass new_slot_id.\n"
     "- appointment_type_id: use 1 (Cleaning) unless the user specifies otherwise.\n"
-    "- Clinic policy, insurance, billing, procedure or hours questions: call search_clinic_docs "
-    "and answer only from its text, naming the source. If it finds nothing, say you do not have "
-    "that information and suggest calling the office. Do not use it for booking.\n\n"
+    + _CLINIC_PROMPT_LINE
+    + "\n"
     f"Today: {datetime.utcnow().strftime('%Y-%m-%d')}. "
     f"Slots available through {(datetime.utcnow() + timedelta(days=27)).strftime('%Y-%m-%d')} (28 days). "
     "Resolve relative dates (today/tomorrow/weekday names) to YYYY-MM-DD before calling tools.\n\n"
@@ -1278,6 +1284,9 @@ def _get_client() -> Groq:
 # Groq sometimes rejects the model's own tool call with a 400 "Failed to parse
 # tool call arguments as JSON". It is intermittent, so a resample usually works.
 _TOOL_PARSE_RETRIES = 2
+# Counts every Groq 400 of this kind, including ones a retry later rescued
+# (the eval harness reads it to measure how often the model emits bad JSON).
+AGENT_STATS = {"tool_parse_errors": 0}
 _TOOL_PARSE_RETRY_TEMPERATURE = 0.3  # temperature 0 may repeat the same bad output
 
 
@@ -1408,6 +1417,8 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                     msgs, temperature=0 if attempt == 0 else _TOOL_PARSE_RETRY_TEMPERATURE
                 )
             except Exception as exc:
+                if is_tool_parse_error(exc):
+                    AGENT_STATS["tool_parse_errors"] += 1
                 if attempt < _TOOL_PARSE_RETRIES and is_tool_parse_error(exc):
                     _parse_retries[0] += 1
                     logger.warning(

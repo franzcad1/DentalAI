@@ -482,6 +482,11 @@ python evals/run_evals.py --full
 # Resume after a daily-limit stop
 python evals/run_evals.py --only-missing
 
+# Diagnosis helpers: run chosen cases N times (tally printed, results not saved),
+# optionally without the M3 knowledge tool and prompt line (pre-M3 behaviour)
+python evals/run_evals.py --only multi-01 --repeat 5
+python evals/run_evals.py --only multi-01 --repeat 5 --ablate rag
+
 # Gate at a custom pass rate
 python evals/run_evals.py --fail-under 85
 ```
