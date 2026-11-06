@@ -671,9 +671,9 @@ Agent runs on Groq `openai/gpt-oss-20b` (one run each, 2026-11-04):
 - **Baseline on `main` (M2 code, no RAG tool), one run:** 9/10 (90%, 36,212 tokens). `book-01` also failed there, so that failure predates M3. `recall-01` and `multi-01` passed with no Groq 400s.
 - So the three Groq 400s on this branch against none on `main` is a suspicious difference, but it is three events in two runs against one baseline run: not enough to say the extra tool or prompt lines cause it. It needs repeat runs on both before the cause is claimed, and the agent loop does not retry this kind of 400 today.
 - Token totals are not directly comparable between runs because cases that error end early.
-- **Retry added (not yet measured live):** the agent now retries that specific Groq 400 up to 2 times, resampling at temperature 0.3 (temperature 0 may repeat the same malformed output). It is covered by offline tests with a fake Groq client; `run_evals.py` prints how many retries a run used. Whether it removes the errors on the real API is untested until the smoke set is run again.
-
-Pending: more repeat smoke runs on both branches (Groq's daily free-tier allowance limits how many per day), and latency of a knowledge question on the deployed backend.
+- **Retry added** (up to 2 retries, resampling at temperature 0.3), offline-tested with a fake Groq client. Two more smoke runs on the branch with the retry (2026-11-06): **9/11 (81%, 35,612 tokens)** and **10/11 (90%, 42,089 tokens)**. `book-01` failed both times, as on `main`. `multi-01` hit the Groq 400 in both runs; the retry rescued it in the second run (after 2 retries) and ran out in the first. `recall-01` passed both times. The "retries used" line counts only cases that finished, so retries spent on a case that still errored are not counted.
+- **Summary across runs:** `main`, 1 run: 9/10, no Groq 400s. This branch, 4 runs: 9/11, 8/11, 9/11, 10/11, with the 400 on `multi-01` in all four. That points to the new tool or prompt lines making malformed tool-call JSON more likely on `multi-01`, but with one baseline run it is not proven, and the retry only partly absorbs it. `book-01` is unrelated to M3 (it fails on `main` too).
+Pending: a `--repeat` option and a `main` baseline with more runs to settle whether M3 raises the `multi-01` 400 rate, and latency of a knowledge question on the deployed backend.
 
 ### Known gaps
 
