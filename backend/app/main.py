@@ -24,11 +24,16 @@ from app.logging_config import configure_logging
 
 configure_logging()
 
+from app.observability import init_tracing
+
+init_tracing()
+
 from app.api import appointments, patients, recalls, slots, webhooks
 from app.api.agent_router import router as agent_router
 from app.api.appointment_types import router as appt_types_router
 from app.api.events_router import router as events_router
 from app.api.locations import router as locations_router
+from app.api.ops_router import router as ops_router
 from app.api.providers import router as providers_router
 from app.auth import create_access_token
 from app.db.session import Base, engine
@@ -92,6 +97,11 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "version": "0.2.0", "startup_id": STARTUP_ID}
 
+    @app.get("/health/deep", tags=["meta"])
+    def health_deep() -> dict:
+        from app.observability.runtime import deep_health
+        return deep_health()
+
     # NexHealth-style CRUD routes
     app.include_router(patients.router, prefix="/api/v1")
     app.include_router(appointments.router, prefix="/api/v1")
@@ -102,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(appt_types_router, prefix="/api/v1")
     app.include_router(locations_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
+    app.include_router(ops_router, prefix="/api/v1")
 
     # AI agent
     app.include_router(agent_router, prefix="/api/v1")

@@ -98,6 +98,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.db.session import SessionLocal
 from app.events.bus import emit_event
+from app.observability import metrics, span
 from app.models.orm import (
     Appointment,
     AppointmentType,
@@ -1308,6 +1309,26 @@ def is_tool_parse_error(exc: BaseException) -> bool:
 
 
 def run_agent(message: str, session_id: str) -> Dict[str, Any]:
+    """Traced entry point: spans, metrics and outcome around the agent loop.
+    Only counts, timings and outcomes are recorded, never message text."""
+    import hashlib
+    sid = hashlib.sha256(session_id.encode()).hexdigest()[:8]
+    with span("agent.run", session_hash=sid) as sp:
+        try:
+            result = _run_agent_impl(message, session_id)
+        except Exception:
+            metrics.inc("agent_turns_total", outcome="error")
+            raise
+        p, c = result.get("prompt_tokens", 0) or 0, result.get("completion_tokens", 0) or 0
+        sp.set(tool_calls=len(result.get("tool_calls", [])), prompt_tokens=p,
+               completion_tokens=c, outcome="ok")
+        metrics.inc("agent_turns_total", outcome="ok")
+        metrics.inc("agent_tokens_total", p, kind="prompt")
+        metrics.inc("agent_tokens_total", c, kind="completion")
+        return result
+
+
+def _run_agent_impl(message: str, session_id: str) -> Dict[str, Any]:
     """Invoke the agent with a user message and return structured output.
 
     Implements a multi-turn function-calling loop:
@@ -1354,6 +1375,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
     tool_call_log: List[Dict[str, Any]] = []
     _tokens: Dict[str, int] = {"prompt": 0, "completion": 0}
     _parse_retries = [0]  # tool-call JSON retries used this turn (reported in the result)
+    _obs: Dict[str, Any] = {"groq_429_count": 0, "groq_429_wait_s": 0.0}
 
     def _parse_retry_wait(exc_str: str) -> float:
         """Parse 'try again in Xm Y.Zs' or 'try again in Y.Zs' → total seconds."""
@@ -1387,6 +1409,9 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
             except _groq_mod.RateLimitError as exc:
                 wait = _parse_retry_wait(str(exc))
                 logger.info("[AGENT] Groq 429 — wait=%.0fs (session=%s)", wait, session_id)
+                metrics.inc("agent_groq_429_total")
+                _obs["groq_429_count"] += 1
+                _obs["groq_429_wait_s"] += min(wait, 300)
                 # Daily/large limits (>5 min) — don't retry, surface immediately
                 if wait > 300:
                     clear_retry_status(session_id)
@@ -1428,6 +1453,7 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
             except Exception as exc:
                 if is_tool_parse_error(exc):
                     AGENT_STATS["tool_parse_errors"] += 1
+                    metrics.inc("agent_tool_parse_errors_total")
                 if attempt < _TOOL_PARSE_RETRIES and is_tool_parse_error(exc):
                     _parse_retries[0] += 1
                     logger.warning(
@@ -1438,7 +1464,21 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
                 raise
 
     for iteration in range(MAX_ITERATIONS):
-        response = _chat_create_resilient(messages)
+        _obs["groq_429_count"], _obs["groq_429_wait_s"] = 0, 0.0
+        _retries_before = _parse_retries[0]
+        _t_llm = time.perf_counter()
+        with span("agent.llm_call", model="openai/gpt-oss-20b", iteration=iteration) as llm_sp:
+            response = _chat_create_resilient(messages)
+            llm_sp.set(
+                groq_429_count=_obs["groq_429_count"],
+                groq_429_wait_s=round(_obs["groq_429_wait_s"]),
+                tool_parse_retries=_parse_retries[0] - _retries_before,
+                finish_reason=response.choices[0].finish_reason or "none",
+                prompt_tokens=(response.usage.prompt_tokens or 0) if response.usage else 0,
+                completion_tokens=(response.usage.completion_tokens or 0) if response.usage else 0,
+                outcome="ok",
+            )
+        metrics.observe("agent_llm_call_duration_ms", (time.perf_counter() - _t_llm) * 1000)
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
@@ -1479,12 +1519,20 @@ def run_agent(message: str, session_id: str) -> Dict[str, Any]:
 
                 # Dispatch to the matching LangChain tool
                 if tool_name in _TOOL_MAP:
-                    try:
-                        tool_output = _TOOL_MAP[tool_name].invoke(tool_input)
-                    except Exception as exc:
-                        tool_output = f"Tool error: {exc}"
+                    with span("agent.tool", tool_name=tool_name) as tsp:
+                        try:
+                            tool_output = _TOOL_MAP[tool_name].invoke(tool_input)
+                            _failed = str(tool_output).startswith(("Error", "Tool error"))
+                            tsp.set(ok=not _failed)
+                        except Exception as exc:
+                            tool_output = f"Tool error: {exc}"
+                            _failed = True
+                            tsp.set(ok=False, error_type=type(exc).__name__)
+                    metrics.inc("agent_tool_calls_total", tool=tool_name,
+                                outcome="error" if _failed else "ok")
                 else:
                     tool_output = f"Unknown tool: {tool_name}"
+                    metrics.inc("agent_tool_calls_total", tool="unknown", outcome="unknown_tool")
 
                 # Log for the response payload
                 tool_call_log.append(

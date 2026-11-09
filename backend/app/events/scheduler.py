@@ -30,6 +30,9 @@ from app.models.orm import Appointment, PatientRecall
 
 logger = logging.getLogger(__name__)
 
+from app.observability import metrics, span
+
+
 # Module-level scheduler instance — started and stopped inside the FastAPI
 # lifespan so its lifetime is tied to the server process.
 scheduler = BackgroundScheduler(timezone="UTC")
@@ -41,6 +44,11 @@ scheduler = BackgroundScheduler(timezone="UTC")
 
 
 def appointment_reminder_job() -> None:
+    with span("scheduler.job", job="appointment_reminder_job"):
+        _appointment_reminder_job()
+
+
+def _appointment_reminder_job() -> None:
     """Fire appointment.reminder for every upcoming appointment in 24 h."""
     db = SessionLocal()
     try:
@@ -75,6 +83,9 @@ def appointment_reminder_job() -> None:
 
     except Exception as exc:
         logger.error("[SCHEDULER] appointment_reminder_job failed: %s", exc, exc_info=True)
+        metrics.inc("scheduler_job_runs_total", job="appointment_reminder_job", outcome="error")
+    else:
+        metrics.inc("scheduler_job_runs_total", job="appointment_reminder_job", outcome="ok")
     finally:
         db.close()
 
@@ -85,6 +96,11 @@ def appointment_reminder_job() -> None:
 
 
 def recall_due_job() -> None:
+    with span("scheduler.job", job="recall_due_job"):
+        _recall_due_job()
+
+
+def _recall_due_job() -> None:
     """Fire recall.due for every pending recall whose due_date has passed."""
     db = SessionLocal()
     try:
@@ -117,6 +133,9 @@ def recall_due_job() -> None:
 
     except Exception as exc:
         logger.error("[SCHEDULER] recall_due_job failed: %s", exc, exc_info=True)
+        metrics.inc("scheduler_job_runs_total", job="recall_due_job", outcome="error")
+    else:
+        metrics.inc("scheduler_job_runs_total", job="recall_due_job", outcome="ok")
     finally:
         db.close()
 
@@ -140,6 +159,14 @@ def start_scheduler() -> None:
         trigger="interval",
         minutes=5,
         id="recall_due",
+        replace_existing=True,
+    )
+    from app.observability.runtime import evaluate_alerts
+    scheduler.add_job(
+        evaluate_alerts,
+        trigger="interval",
+        minutes=1,
+        id="alert_eval",
         replace_existing=True,
     )
     scheduler.start()
