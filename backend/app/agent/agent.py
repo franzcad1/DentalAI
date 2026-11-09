@@ -1259,6 +1259,10 @@ _SYSTEM_PROMPT = (
     "1. After presenting a slot list, keep each slot_id mapped to its list number.\n"
     "2. When the user picks a slot by number, use that slot_id directly in book_appointment — "
     "do NOT re-query check_available_slots (re-querying changes ordering and books the wrong slot).\n"
+    "3. If the user already authorised the booking in the same message (e.g. 'book it', 'go ahead', "
+    "'confirm it', 'any provider'), do not ask them to choose: call check_available_slots, take the "
+    "earliest slot that ends by 17:00, call book_appointment with it, then state the booked time and "
+    "provider and say the appointment is confirmed. Without that authorisation, list slots and ask.\n"
 )
 
 # ---------------------------------------------------------------------------
