@@ -5,12 +5,14 @@ services:
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: bash docker-entrypoint.sh
+    # NOTE: SQLite under /tmp is wiped on every restart/deploy (Render free tier has no
+    # persistent disk), so bookings made on the live site do not survive a restart.
     envVars:
       - key: DATABASE_URL
         value: sqlite:////tmp/dentalai.db
       - key: JWT_SECRET
         generateValue: true
-      - key: OPENAI_API_KEY
+      - key: GROQ_API_KEY
         sync: false
       - key: CORS_ORIGINS
         sync: false

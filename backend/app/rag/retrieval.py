@@ -3,7 +3,7 @@
 Failure policy: if RAG is not configured, Postgres is unreachable or the
 embeddings call fails, the tool returns a fixed "unavailable" string and the
 rest of the agent keeps working. Questions are never logged (they may contain
-personal details); only the exception type is.
+personal details); only the exception type and, for a missing setting, the names of the unset env vars are.
 """
 
 import logging
@@ -55,7 +55,8 @@ def _backends() -> Any:
 
         _embedder, _store = get_embedder(), get_store()
     if _embedder is None or _store is None:
-        raise RuntimeError("RAG is not configured")
+        missing = [n for n in ("RAG_DATABASE_URL", "COHERE_API_KEY") if not os.getenv(n)]
+        raise RuntimeError("RAG is not configured: not set: %s" % ", ".join(missing))
     return _embedder, _store
 
 
@@ -82,6 +83,15 @@ def format_hits(hits: List[Hit]) -> str:
     return "\n\n".join("[Source: %s]\n%s" % (c.title, c.content) for c, _ in hits)
 
 
+def _reason(exc: Exception) -> str:
+    """Short, safe reason for the log. Only our own "not configured" message
+    (it names env vars, never values) is shown; for anything else (driver or
+    network errors can embed connection strings or keys) just the type."""
+    if isinstance(exc, RuntimeError) and str(exc).startswith("RAG is not configured"):
+        return str(exc)
+    return "see exception type"
+
+
 def lookup(question: str) -> str:
     """Entry point used by the agent tool. Never raises."""
     if not question or not question.strip():
@@ -89,5 +99,5 @@ def lookup(question: str) -> str:
     try:
         return format_hits(search_docs(question))
     except Exception as exc:  # noqa: BLE001 - degrade, do not break the agent
-        logger.warning("[RAG] lookup unavailable (%s)", type(exc).__name__)
+        logger.warning("[RAG] lookup unavailable (%s): %s", type(exc).__name__, _reason(exc))
         return UNAVAILABLE
