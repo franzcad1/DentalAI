@@ -233,6 +233,15 @@ function buildSuggestionGroups(names: string[]): SuggestionGroup[] {
   const [a, b, c, d] = [...names, 'a patient', 'a patient', 'a patient', 'a patient']
   return [
     {
+      label: 'Clinic info (RAG)',
+      prompts: [
+        'What is your late cancellation fee?',
+        'What are your office hours?',
+        'Do you offer payment plans?',
+        'What should I do in a dental emergency?',
+      ],
+    },
+    {
       label: 'Scheduling',
       prompts: [
         `Search for ${a} and book a cleaning this week`,
