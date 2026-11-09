@@ -266,3 +266,26 @@ def test_pgvector_store_roundtrip_and_idempotent():
     finally:
         with store.engine.begin() as conn:
             conn.execute(text("DROP TABLE IF EXISTS doc_chunks"))
+
+
+def test_unavailable_log_names_missing_env_vars_but_no_secrets(caplog, monkeypatch):
+    retrieval.set_backends(None, None)
+    monkeypatch.delenv("RAG_DATABASE_URL", raising=False)
+    monkeypatch.setenv("COHERE_API_KEY", "sk-secret-value")
+    with caplog.at_level(logging.WARNING):
+        assert retrieval.lookup("Where do I park?") == retrieval.UNAVAILABLE
+    assert "RAG_DATABASE_URL" in caplog.text
+    assert "COHERE_API_KEY" not in caplog.text
+    assert "sk-secret-value" not in caplog.text
+
+
+def test_unavailable_log_hides_driver_error_text(caplog):
+    class Boom:
+        def embed(self, *a):
+            raise RuntimeError("postgresql://user:pw@host/db failed")
+
+    retrieval.set_backends(Boom(), object())
+    with caplog.at_level(logging.WARNING):
+        retrieval.lookup("hours?")
+    retrieval.set_backends(None, None)
+    assert "pw@host" not in caplog.text and "RuntimeError" in caplog.text
