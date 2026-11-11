@@ -558,7 +558,8 @@ def main() -> None:
             print(f"ERROR: {e}")
             sys.exit(3)
     # --full runs everything; default runs only smoke-tagged cases
-    elif args.full:
+    elif args.full or args.category:
+        # --category searches every case, not just the smoke subset
         cases = all_cases
     else:
         smoke = [c for c in all_cases if c.get("smoke")]
