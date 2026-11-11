@@ -10,6 +10,7 @@ import { BookingChatView } from '@/views/BookingChatView'
 import { AgentLogView } from '@/views/AgentLogView'
 import { PatientsView } from '@/views/PatientsView'
 import { AboutView } from '@/views/AboutView'
+import { OpsView } from '@/views/OpsView'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/patients" element={<PatientsView />} />
           <Route path="/log" element={<AgentLogView />} />
           <Route path="/about" element={<AboutView />} />
+          <Route path="/ops" element={<OpsView />} />
         </Route>
       </Routes>
       </BackendGate>

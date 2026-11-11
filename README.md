@@ -688,3 +688,45 @@ Pending: smoke set rerun after the fix, and latency of a knowledge question on t
 - No reranking, hybrid keyword search or approximate index; unnecessary at this size and deliberately left out.
 - `psycopg2-binary` is the only new dependency; it installed and connected on 32-bit Python 3.8 on Windows (wheel `cp38-win32`).
 - Knowledge answers depend on the model following the prompt (call the tool, cite, do not invent); the `knowledge` cases measure this but do not guarantee it.
+
+---
+
+## M1b — Monitoring and Tracing
+
+Goal: answer "why was this request slow or wrong?" from tools instead of guessing. Design note: `m1b/M1b-monitoring-design.md` in the project files.
+
+**What was added**
+- **Traces.** One trace per request: `http.request` > `agent.run` > `agent.llm_call` (per Groq call: 429 count and wait, tool-parse retries, finish reason, tokens) and `agent.tool` > `rag.lookup` (embed and search timings, hits, top score, fallback reason). Scheduler jobs get a `scheduler.job` span. `trace_id` is now in every JSON log line next to `request_id`.
+- **Metrics (in memory, one-minute buckets).** Requests and latency by route template, agent turns, Groq 429s, tool-parse errors, tool calls, tokens, RAG outcomes (`hit`, `no_hit`, `unavailable`), scheduler job runs.
+- **Alerts.** Rules for 5xx share, chat p95 latency, Groq 429 count, RAG unavailable, tool-parse errors, scheduler failure, degraded deep health. They write `alert_fired` / `alert_resolved` log lines and call `ALERT_WEBHOOK_URL` if set. **Thresholds are provisional defaults and must be replaced from a measured baseline.**
+- **Endpoints.** `GET /health/deep` (database, RAG settings, Groq key present; no values). `GET /api/v1/ops/summary` with header `X-Ops-Token`; returns 404 when `OPS_TOKEN` is unset. A read-only page at `/ops` in the frontend reads it (not linked in the sidebar).
+- **Request ID hardening.** A client `X-Request-ID` is kept only if it is 1 to 64 characters of letters, digits, `.`, `_`, `-`; otherwise a new UUID is used.
+
+**Settings**
+| Variable | Meaning |
+|---|---|
+| `OBSERVABILITY` | `off`, `local` (default: spans as JSON log lines, in-memory metrics) or `azure` (local plus export to Application Insights) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Needed for `azure`. Set it only in the host environment, never in the repo |
+| `OPS_TOKEN` | Enables `/api/v1/ops/*` |
+| `ALERT_WEBHOOK_URL` | Optional. Without it nothing is sent anywhere |
+| `ALERT_WINDOW_S`, `ALERT_MIN_REQUESTS`, `ALERT_5XX_SHARE`, `ALERT_CHAT_P95_MS`, `ALERT_GROQ_429`, `ALERT_TOOL_PARSE_ERRORS` | Provisional alert thresholds |
+
+**No PHI in telemetry.** Spans are created only through `app/observability/tracing.py`. Attribute names must be on an allowlist and values must be numbers, booleans or short token-like strings, so message text, names, emails and exception messages cannot be attached. Exceptions are recorded as the type only. A test runs a chat with a synthetic name, email and phone number and asserts none appear in any span; another test fails if any other module calls `set_attribute`.
+
+**Known limits (stated, not hidden)**
+- Metrics and alert state live in memory: they reset on restart or redeploy, and the Render free tier sleeps when idle. Durable history is the exporter's job.
+- Alerts are only evaluated while the service is awake. An external check of `/health/deep` is not set up yet.
+- The Azure exporter and `opentelemetry-sdk` were installed and tested on Python 3.11 only. Not yet verified on 32-bit Python 3.8 on Windows.
+- Alert thresholds, the failure drill (five injected faults with timings) and the log-volume check against Application Insights limits are still to be run; no results are claimed here.
+
+**Measured so far (one machine, in-process FastAPI TestClient, not a network benchmark)**
+`GET /api/v1/patients`, 2,000 requests after 100 warm-up, empty in-memory SQLite, Linux x86_64 with 4 CPUs, Python 3.11, three runs each:
+
+| Mode | p50 (ms) | p95 (ms) |
+|---|---|---|
+| `OBSERVABILITY=off` | 4.44, 4.53, 4.40 | 5.37, 5.66, 5.50 |
+| `OBSERVABILITY=local` | 4.88, 4.95, 4.70 | 5.96, 6.16, 5.81 |
+
+That is roughly 0.3 to 0.4 ms (7 to 10 percent) more per request in `local` mode on this setup, including one extra JSON log line per span. The `azure` mode was not measured.
+
+**Tests:** `backend/tests/test_observability.py` (26 tests: span tree, 429 and 400 paths, tool errors, PHI and allowlist, request ID validation, route templates, ops auth, deep health, metrics bounds and thread safety, alert cooldown and resolution, scheduler failure).

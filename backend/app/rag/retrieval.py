@@ -8,11 +8,15 @@ personal details); only the exception type and, for a missing setting, the names
 
 import logging
 import os
+import time
 from typing import Any, List, Optional
 
 from .store import Hit
 
 logger = logging.getLogger(__name__)
+
+from app.observability import annotate, metrics, span
+
 
 DEFAULT_TOP_K = 4
 # Chosen from the first real retrieval eval run (see README, M3 Numbers): at 0.40
@@ -73,8 +77,15 @@ def search_docs(
     k = k or int(os.getenv("RAG_TOP_K", DEFAULT_TOP_K))
     if min_score is None:
         min_score = float(os.getenv("RAG_MIN_SCORE", DEFAULT_MIN_SCORE))
+    t0 = time.perf_counter()
     vector = embedder.embed([question], "search_query")[0]
-    return [(c, s) for c, s in store.search(vector, k) if s >= min_score]
+    t1 = time.perf_counter()
+    raw = store.search(vector, k)
+    t2 = time.perf_counter()
+    hits = [(c, s) for c, s in raw if s >= min_score]
+    annotate(embed_ms=round((t1 - t0) * 1000), search_ms=round((t2 - t1) * 1000),
+             hits=len(hits), top_score=round(max([s for _, s in raw] or [0.0]), 2))
+    return hits
 
 
 def format_hits(hits: List[Hit]) -> str:
@@ -92,12 +103,30 @@ def _reason(exc: Exception) -> str:
     return "see exception type"
 
 
+def _fallback_reason(exc: Exception) -> str:
+    """Token-like reason for traces. Names the missing settings, never values."""
+    text = str(exc)
+    prefix = "RAG is not configured: not set: "
+    if isinstance(exc, RuntimeError) and text.startswith(prefix):
+        return "not_configured:" + text[len(prefix):].replace(" ", "")
+    return "error"
+
+
 def lookup(question: str) -> str:
     """Entry point used by the agent tool. Never raises."""
     if not question or not question.strip():
         return NO_INFO
-    try:
-        return format_hits(search_docs(question))
-    except Exception as exc:  # noqa: BLE001 - degrade, do not break the agent
-        logger.warning("[RAG] lookup unavailable (%s): %s", type(exc).__name__, _reason(exc))
-        return UNAVAILABLE
+    t0 = time.perf_counter()
+    with span("rag.lookup") as sp:
+        try:
+            hits = search_docs(question)
+            outcome = "hit" if hits else "no_hit"
+            result = format_hits(hits)
+        except Exception as exc:  # noqa: BLE001 - degrade, do not break the agent
+            logger.warning("[RAG] lookup unavailable (%s): %s", type(exc).__name__, _reason(exc))
+            outcome, result = "unavailable", UNAVAILABLE
+            sp.set(error_type=type(exc).__name__, fallback_reason=_fallback_reason(exc))
+        sp.set(outcome=outcome)
+    metrics.inc("rag_lookups_total", outcome=outcome)
+    metrics.observe("rag_lookup_duration_ms", (time.perf_counter() - t0) * 1000)
+    return result

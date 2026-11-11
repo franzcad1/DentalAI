@@ -45,6 +45,11 @@ psycopg2-binary==2.9.9
 # Logging
 python-json-logger==2.0.7
 
+# M1b monitoring: spans via OpenTelemetry SDK; the Azure exporter is only imported
+# when OBSERVABILITY=azure. Not yet verified on 32-bit Python 3.8 / Windows (Franz to confirm).
+opentelemetry-sdk==1.27.0
+azure-monitor-opentelemetry-exporter==1.0.0b32
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0

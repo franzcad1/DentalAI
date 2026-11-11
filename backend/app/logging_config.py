@@ -119,6 +119,11 @@ class RequestIdFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = request_id_var.get()  # type: ignore[attr-defined]
+        try:
+            from app.observability.tracing import current_trace_id
+            record.trace_id = current_trace_id()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - never break logging
+            record.trace_id = "-"  # type: ignore[attr-defined]
         return True
 
 
@@ -204,7 +209,7 @@ def _make_handler() -> logging.StreamHandler:  # type: ignore[type-arg]
     """
     handler = logging.StreamHandler(sys.stdout)
     formatter = PhiRedactingJsonFormatter(
-        fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s %(trace_id)s",
         rename_fields={
             "asctime": "timestamp",
             "levelname": "level",
