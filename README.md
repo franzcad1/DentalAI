@@ -730,3 +730,30 @@ Goal: answer "why was this request slow or wrong?" from tools instead of guessin
 That is roughly 0.3 to 0.4 ms (7 to 10 percent) more per request in `local` mode on this setup, including one extra JSON log line per span. The `azure` mode was not measured.
 
 **Tests:** `backend/tests/test_observability.py` (26 tests: span tree, 429 and 400 paths, tool errors, PHI and allowlist, request ID validation, route templates, ops auth, deep health, metrics bounds and thread safety, alert cooldown and resolution, scheduler failure).
+
+---
+
+## Hallucination Evaluation
+
+**Goal:** measure whether the agent makes things up: invented clinic facts, guessing instead of saying "not found", and claiming a booking or cancellation that did not happen. Design note: kept in the project files (not in this repo). Synthetic data only.
+
+### What was added
+- `backend/evals/hallucination.py`: pure scoring functions (not-found wording, invented specifics such as money, phone numbers and clock times, source named, action claims versus tool output and database counts).
+- 20 cases in category `hallucination`: 7 `hall-nf-*` (documents do not answer, must say so, no invented specifics), 7 `hall-fact-*` (expected value, named source, no wrong value), 6 `hall-act-*` (claims checked against the tool result and the eval database before and after).
+- Hallucination cases save the raw answer and tool outputs in the results file so scoring rules can be re-checked without new Groq calls.
+- 11 offline tests in `backend/tests/test_hallucination_checks.py`.
+
+### Running
+```
+cd backend
+py evals/run_evals.py --category hallucination --repeat 3 --reseed
+```
+Free Groq tier: run in slices with `--only` (for example `--only hall-nf-01,hall-nf-02,hall-nf-03`) across days. Not-found and fact cases need `RAG_DATABASE_URL` and `COHERE_API_KEY`.
+
+### Numbers
+No real run yet. Pass rates will be added here from real output only.
+
+### Limits
+- Phrase-based grading can mark a good answer wrong or miss an oddly worded invention; read failures by hand.
+- The database check covers appointment counts and cancelled counts only.
+- 11 synthetic documents make retrieval look easier than real life.

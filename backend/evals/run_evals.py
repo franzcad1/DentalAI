@@ -15,6 +15,7 @@ Each case checks:
   5. Arg checks      — required argument values appear in at least one
                        call to the target tool
 
+Hallucination fields (see evals/hallucination.py): `must_say_not_found`, `expected_source`, `check_claims`.
 Optional case fields: `response_excludes` (phrases that must NOT appear, used
 to catch invented answers) and `requires: "rag"` (case is skipped unless
 RAG_DATABASE_URL and COHERE_API_KEY are set).
@@ -52,6 +53,8 @@ except ImportError:
 
 # Make sure the app package is importable when run from backend/
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from evals import hallucination  # noqa: E402
 
 # Populated at runtime after key check (allows --help without a key)
 run_agent: Callable = None  # type: ignore[assignment]
@@ -218,7 +221,12 @@ class DailyLimitStop(Exception):
         self.provider_msg = provider_msg
 
 
-def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+def score_case(
+    case: Dict[str, Any],
+    result: Dict[str, Any],
+    db_before: Optional[Dict[str, int]] = None,
+    db_after: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     called = _tools_called(result)
     expected = case.get("expected_tools", [])
     phrases = case.get("response_contains", [])
@@ -232,8 +240,22 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
     no_forbidden = check_forbidden_tools(forbidden, called)
     args_ok = check_expected_args(exp_args, result)
 
-    passed = coverage and order and text and excl_ok and no_forbidden and args_ok
-    return {
+    response = result.get("response", "")
+    extra: Dict[str, Any] = {}
+    if case.get("must_say_not_found"):
+        extra["not_found"] = hallucination.check_not_found(response)
+        extra["no_invented_specifics"] = not hallucination.invented_specifics(response)
+    if case.get("expected_source"):
+        extra["source_named"] = hallucination.check_source(case["expected_source"], response)
+    if case.get("check_claims"):
+        verdict = hallucination.check_action_claims(
+            response, result.get("tool_calls", []), db_before, db_after)
+        extra["action_claims_ok"] = verdict["ok"]
+        extra["claim_problems"] = verdict["reasons"]
+    extra_ok = all(v for k, v in extra.items() if k != "claim_problems")
+
+    passed = coverage and order and text and excl_ok and no_forbidden and args_ok and extra_ok
+    out = {
         "id": case["id"],
         "category": case["category"],
         "passed": passed,
@@ -255,6 +277,12 @@ def score_case(case: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
         "actual_tools": called,
         "response_snippet": result.get("response", "")[:120],
     }
+    if extra:
+        out["checks"].update({k: v for k, v in extra.items() if k != "claim_problems"})
+        out["claim_problems"] = extra.get("claim_problems", [])
+        # Raw answer and tool outputs so scoring rules can be re-checked without new Groq calls.
+        out["raw"] = {"response": response, "tool_calls": result.get("tool_calls", [])}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -267,8 +295,10 @@ def run_cases(cases: List[Dict[str, Any]], delay: float = 1.5) -> List[Dict[str,
         session_id = f"eval-{uuid.uuid4().hex[:8]}"
         print(f"  [{i+1:02d}/{len(cases)}] {case['id']} ... ", end="", flush=True)
         try:
+            before = hallucination.db_snapshot() if case.get("check_claims") else None
             result = run_agent(case["input"], session_id=session_id)
-            outcome = score_case(case, result)
+            after = hallucination.db_snapshot() if case.get("check_claims") else None
+            outcome = score_case(case, result, before, after)
             print("PASS" if outcome["passed"] else "FAIL")
             if not outcome["passed"]:
                 _print_failure(outcome)
