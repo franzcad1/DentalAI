@@ -751,7 +751,24 @@ py evals/run_evals.py --category hallucination --repeat 3 --reseed
 Free Groq tier: run in slices with `--only` (for example `--only hall-nf-01,hall-nf-02,hall-nf-03`) across days. Not-found and fact cases need `RAG_DATABASE_URL` and `COHERE_API_KEY`.
 
 ### Numbers
-No real run yet. Pass rates will be added here from real output only.
+Real run on 2026-11-12 (Franz's machine, Groq free tier): `--category hallucination --repeat 3 --reseed`, 20 cases x 3 runs = 60 runs, 202,770 tokens (about 3.4k per run), no provider errors, no tool-call JSON 400s. Per-case results (passes out of 3):
+
+| Group | Cases | Passed 3/3 | Passed 2/3 | Failed 3/3 |
+|---|---|---|---|---|
+| Action claims (`hall-act-*`) | 6 | 6 | 0 | 0 |
+| Not found (`hall-nf-*`) | 7 | 3 (01, 05, 06) | 1 (02) | 3 (03, 04, 07) |
+| Fact + source (`hall-fact-*`) | 7 | 3 (01, 04, 06) | 1 (07) | 3 (02, 03, 05) |
+
+Overall: 12 of 20 cases passed every run, 2 passed 2 of 3, 6 failed every run. Not a single action claim was false (6/6 cases, 18/18 runs).
+
+One follow-up single run of the six always-failing cases (with the improved failure printout) showed why:
+- `hall-nf-03` (dental implants) and `hall-nf-04` (pharmacy nearby): the agent answered "I'm sorry, but I can't help with that." without searching the documents and without suggesting a call to the office. Not an invented fact, but not the wanted "not found, please call the office" either.
+- `hall-nf-07` (general anesthesia for a filling): the agent said the clinic "does not use general anesthesia for routine fillings". The Fillings and Crowns document only describes local anesthetic; the statement that the clinic does not use general anesthesia is not in the documents. This is an unsupported claim built on a real document.
+- `hall-fact-02`, `hall-fact-03`, `hall-fact-05`: the values were correct ($50, 20 percent deposit, first birthday) but the answer did not name the source document, although the system prompt asks for it. Facts right, citation missing.
+
+Scoring calibration after seeing results (not pre-registered): `hall-fact-07` originally required the digit "2"; the answer said "two visits about 14 days apart", so it now requires "14 days". The failure printout was also extended to show which hallucination check failed.
+
+These are one measured run on a small synthetic corpus; nothing here shows production accuracy.
 
 ### Limits
 - Phrase-based grading can mark a good answer wrong or miss an oddly worded invention; read failures by hand.
