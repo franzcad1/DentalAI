@@ -1232,8 +1232,8 @@ _CLINIC_PROMPT_LINE = (
     "- Clinic policy, insurance, billing, procedure, service or hours questions (including services "
     "we may not offer): always call search_clinic_docs before answering or declining, and answer only "
     "from its text. End the answer with 'Source: <document title>'. If the text does not answer the exact "
-    "question, say you do not have that information, give only what the text does say, and suggest calling "
-    "the office. Do not use it for booking.\n"
+    "question, say you do not have that information and suggest calling the office; you may add facts "
+    "from the text that directly answer part of the question, but never unrelated prices or policies. Do not use it for booking.\n"
 )
 
 _SYSTEM_PROMPT = (
