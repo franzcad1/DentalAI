@@ -366,6 +366,12 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
         print(f"     forbidden_tools FAIL — snippet: {outcome['response_snippet']!r}")
     if not checks["expected_args"]:
         print(f"     expected_args FAIL — actual tools: {outcome['actual_tools']}")
+    for name in ("not_found", "no_invented_specifics", "source_named", "action_claims_ok"):
+        if name in checks and not checks[name]:
+            extra = f" — {outcome['claim_problems']}" if name == "action_claims_ok" else ""
+            print(f"     {name} FAIL{extra}")
+    if any(k in checks and not checks[k] for k in ("not_found", "no_invented_specifics", "source_named", "action_claims_ok")):
+        print(f"     answer: {outcome.get('raw', {}).get('response', '')[:300]!r}")
 
 
 _PROVIDER_ERROR_LIMIT = 3  # more than this many provider errors → suspect infra outage

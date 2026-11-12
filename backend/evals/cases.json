@@ -529,7 +529,7 @@
     "requires": "rag",
     "input": "How many visits does a crown take?",
     "expected_tools": ["search_clinic_docs"],
-    "response_contains": ["2"],
+    "response_contains": ["14 days"],
     "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
     "expected_args": {},
     "expected_source": "Fillings and Crowns"
