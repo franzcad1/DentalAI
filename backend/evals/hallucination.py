@@ -24,7 +24,7 @@ NOT_FOUND_PHRASES = [
 # Invented specifics that must not appear in a "not found" answer.
 _PHONE = re.compile(r"\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b")
 _CLOCK = re.compile(r"\b\d{1,2}(:\d{2})?\s?(am|pm)\b", re.I)
-_MONEY = re.compile(r"\$\s?\d")
+_MONEY_FULL = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?")
 
 
 def _norm(s: str) -> str:
@@ -37,15 +37,21 @@ def check_not_found(response: str) -> bool:
     return any(p in n for p in NOT_FOUND_PHRASES)
 
 
-def invented_specifics(response: str) -> List[str]:
-    """Names of invented-looking specifics (money, phone number, clock time) in the answer."""
+def _squash(s: str) -> str:
+    return re.sub(r"\s+", "", s).lower()
+
+
+def invented_specifics(response: str, supported_text: str = "") -> List[str]:
+    """Names of specifics (money, phone number, clock time) in the answer that do NOT appear in
+    supported_text (the tool outputs the agent actually received). With no supported_text every
+    specific counts as invented. A true fact from the documents is not an invention."""
+    support = _squash(supported_text)
     found = []
-    if _MONEY.search(response):
-        found.append("money")
-    if _PHONE.search(response):
-        found.append("phone")
-    if _CLOCK.search(response):
-        found.append("clock_time")
+    for kind, pattern in (("money", _MONEY_FULL), ("phone", _PHONE), ("clock_time", _CLOCK)):
+        for m in pattern.finditer(response):
+            if _squash(m.group(0)) not in support:
+                found.append(kind)
+                break
     return found
 
 

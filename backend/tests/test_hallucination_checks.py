@@ -25,6 +25,12 @@ def test_invented_specifics():
     assert h.invented_specifics("I don't have that information.") == []
 
 
+def test_specifics_found_in_tool_output_are_not_invented():
+    docs = "Payment plan for treatment over $500, 20 percent deposit. We open 8:00 AM."
+    assert h.invented_specifics("Plans cover treatments over $500.", docs) == []
+    assert h.invented_specifics("Implants cost $3,000.", docs) == ["money"]
+
+
 def test_source_named_case_and_apostrophe_insensitive():
     assert h.check_source("Children's Dentistry", "Source: children’s dentistry")
     assert not h.check_source("Privacy and Records", "Source: Your First Visit")
