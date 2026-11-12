@@ -244,7 +244,8 @@ def score_case(
     extra: Dict[str, Any] = {}
     if case.get("must_say_not_found"):
         extra["not_found"] = hallucination.check_not_found(response)
-        extra["no_invented_specifics"] = not hallucination.invented_specifics(response)
+        supported = " ".join(str(tc.get("output", "")) for tc in result.get("tool_calls", []))
+        extra["no_invented_specifics"] = not hallucination.invented_specifics(response, supported)
     if case.get("expected_source"):
         extra["source_named"] = hallucination.check_source(case["expected_source"], response)
     if case.get("check_claims"):
