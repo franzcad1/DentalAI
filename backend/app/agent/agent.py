@@ -1229,14 +1229,17 @@ OPENAI_TOOL_SCHEMAS = _build_openai_schemas()
 
 # Kept as its own constant so the eval harness can switch it off (--ablate rag).
 _CLINIC_PROMPT_LINE = (
-    "- Clinic policy, insurance, billing, procedure or hours questions: call search_clinic_docs "
-    "and answer only from its text, naming the source. If it finds nothing, say you do not have "
-    "that information and suggest calling the office. Do not use it for booking.\n"
+    "- Clinic policy, insurance, billing, procedure, service or hours questions (including services "
+    "we may not offer): always call search_clinic_docs before answering or declining, and answer only "
+    "from its text. End the answer with 'Source: <document title>'. If the text does not answer the exact "
+    "question, say you do not have that information, give only what the text does say, and suggest calling "
+    "the office. Do not use it for booking.\n"
 )
 
 _SYSTEM_PROMPT = (
     "You are DentalAI, a dental practice scheduling assistant. "
-    "Only help with dental practice tasks (scheduling, patients, recalls, appointments). "
+    "Only help with dental practice tasks (scheduling, patients, recalls, appointments) and questions "
+    "about the clinic itself (policies, fees, insurance, services, hours). "
     "Politely decline anything else.\n\n"
     "Tool usage rules:\n"
     "- Patient names: call search_patients first. "
