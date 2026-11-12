@@ -768,6 +768,8 @@ One follow-up single run of the six always-failing cases (with the improved fail
 
 Scoring calibration after seeing results (not pre-registered): `hall-fact-07` originally required the digit "2"; the answer said "two visits about 14 days apart", so it now requires "14 days". The failure printout was also extended to show which hallucination check failed.
 
+Second calibration (2026-11-12, after a partial rerun with a prompt fix): the not-found check flagged money amounts that were true facts from the documents (an unrelated payment-plan and whitening price the agent added to a "not found" answer). The check now counts a figure as invented only when it is not in the tool output the agent received. The padding itself is handled in the prompt, not hidden by the scorer.
+
 These are one measured run on a small synthetic corpus; nothing here shows production accuracy.
 
 ### Limits
