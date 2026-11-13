@@ -770,6 +770,8 @@ Scoring calibration after seeing results (not pre-registered): `hall-fact-07` or
 
 Second calibration (2026-11-12, after a partial rerun with a prompt fix): the not-found check flagged money amounts that were true facts from the documents (an unrelated payment-plan and whitening price the agent added to a "not found" answer). The check now counts a figure as invented only when it is not in the tool output the agent received. The padding itself is handled in the prompt, not hidden by the scorer.
 
+After the prompt fix (partial, 2026-11-12/13, not a full rerun): a first rerun was cut off by the Groq daily limit after 9 of 20 cases (one run each); then a five-case check (`hall-nf-03`, `hall-nf-06`, `hall-fact-03`, `hall-act-01`, `hall-act-02`) passed 4 of 5, 20,217 tokens. The one miss, `hall-act-02`, checked available slots instead of calling the booking tool and never claimed a booking; 5 repeat runs of that case passed 5 of 5 (19,456 tokens), so it looks like run-to-run variation. A full `--category hallucination --repeat 3` rerun after the fix has not been done yet, so no new overall pass rate is claimed.
+
 These are one measured run on a small synthetic corpus; nothing here shows production accuracy.
 
 ### Limits
