@@ -17,6 +17,7 @@ NOT_FOUND_PHRASES = [
     "do not have any information", "don't have any information",
     "not available", "no information", "not covered", "not listed",
     "call the office", "contact the office", "call us", "call the clinic",
+    "not aware of", "do not know", "don't know",
     "cannot find", "can't find", "could not find", "couldn't find",
     "unable to find", "not able to find",
 ]
