@@ -730,3 +730,49 @@ Goal: answer "why was this request slow or wrong?" from tools instead of guessin
 That is roughly 0.3 to 0.4 ms (7 to 10 percent) more per request in `local` mode on this setup, including one extra JSON log line per span. The `azure` mode was not measured.
 
 **Tests:** `backend/tests/test_observability.py` (26 tests: span tree, 429 and 400 paths, tool errors, PHI and allowlist, request ID validation, route templates, ops auth, deep health, metrics bounds and thread safety, alert cooldown and resolution, scheduler failure).
+
+---
+
+## Hallucination Evaluation
+
+**Goal:** measure whether the agent makes things up: invented clinic facts, guessing instead of saying "not found", and claiming a booking or cancellation that did not happen. Design note: kept in the project files (not in this repo). Synthetic data only.
+
+### What was added
+- `backend/evals/hallucination.py`: pure scoring functions (not-found wording, invented specifics such as money, phone numbers and clock times, source named, action claims versus tool output and database counts).
+- 20 cases in category `hallucination`: 7 `hall-nf-*` (documents do not answer, must say so, no invented specifics), 7 `hall-fact-*` (expected value, named source, no wrong value), 6 `hall-act-*` (claims checked against the tool result and the eval database before and after).
+- Hallucination cases save the raw answer and tool outputs in the results file so scoring rules can be re-checked without new Groq calls.
+- 11 offline tests in `backend/tests/test_hallucination_checks.py`.
+
+### Running
+```
+cd backend
+py evals/run_evals.py --category hallucination --repeat 3 --reseed
+```
+Free Groq tier: run in slices with `--only` (for example `--only hall-nf-01,hall-nf-02,hall-nf-03`) across days. Not-found and fact cases need `RAG_DATABASE_URL` and `COHERE_API_KEY`.
+
+### Numbers
+Real run on 2026-11-12 (Franz's machine, Groq free tier): `--category hallucination --repeat 3 --reseed`, 20 cases x 3 runs = 60 runs, 202,770 tokens (about 3.4k per run), no provider errors, no tool-call JSON 400s. Per-case results (passes out of 3):
+
+| Group | Cases | Passed 3/3 | Passed 2/3 | Failed 3/3 |
+|---|---|---|---|---|
+| Action claims (`hall-act-*`) | 6 | 6 | 0 | 0 |
+| Not found (`hall-nf-*`) | 7 | 3 (01, 05, 06) | 1 (02) | 3 (03, 04, 07) |
+| Fact + source (`hall-fact-*`) | 7 | 3 (01, 04, 06) | 1 (07) | 3 (02, 03, 05) |
+
+Overall: 12 of 20 cases passed every run, 2 passed 2 of 3, 6 failed every run. Not a single action claim was false (6/6 cases, 18/18 runs).
+
+One follow-up single run of the six always-failing cases (with the improved failure printout) showed why:
+- `hall-nf-03` (dental implants) and `hall-nf-04` (pharmacy nearby): the agent answered "I'm sorry, but I can't help with that." without searching the documents and without suggesting a call to the office. Not an invented fact, but not the wanted "not found, please call the office" either.
+- `hall-nf-07` (general anesthesia for a filling): the agent said the clinic "does not use general anesthesia for routine fillings". The Fillings and Crowns document only describes local anesthetic; the statement that the clinic does not use general anesthesia is not in the documents. This is an unsupported claim built on a real document.
+- `hall-fact-02`, `hall-fact-03`, `hall-fact-05`: the values were correct ($50, 20 percent deposit, first birthday) but the answer did not name the source document, although the system prompt asks for it. Facts right, citation missing.
+
+Scoring calibration after seeing results (not pre-registered): `hall-fact-07` originally required the digit "2"; the answer said "two visits about 14 days apart", so it now requires "14 days". The failure printout was also extended to show which hallucination check failed.
+
+Second calibration (2026-11-12, after a partial rerun with a prompt fix): the not-found check flagged money amounts that were true facts from the documents (an unrelated payment-plan and whitening price the agent added to a "not found" answer). The check now counts a figure as invented only when it is not in the tool output the agent received. The padding itself is handled in the prompt, not hidden by the scorer.
+
+These are one measured run on a small synthetic corpus; nothing here shows production accuracy.
+
+### Limits
+- Phrase-based grading can mark a good answer wrong or miss an oddly worded invention; read failures by hand.
+- The database check covers appointment counts and cancelled counts only.
+- 11 synthetic documents make retrieval look easier than real life.

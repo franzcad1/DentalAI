@@ -376,5 +376,223 @@
     "response_contains": ["closed"],
     "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
     "expected_args": {}
+  },
+  {
+    "id": "hall-nf-01",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "Do you offer braces or Invisalign?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true,
+    "smoke": true
+  },
+  {
+    "id": "hall-nf-02",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "What is the clinic's phone number?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-nf-03",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "Do you do dental implants, and how much do they cost?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-nf-04",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "Is there a pharmacy near the clinic?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-nf-05",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "Do you have a referral or loyalty discount program?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-nf-06",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "How much does a wisdom tooth extraction cost?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-nf-07",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "Can I be put under general anesthesia for a filling?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "must_say_not_found": true
+  },
+  {
+    "id": "hall-fact-01",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "What happens if I just don't show up for my appointment?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["$75"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Cancellation and Late Policy",
+    "response_excludes": ["$50 no-show"]
+  },
+  {
+    "id": "hall-fact-02",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "how much is the late cancelation fee",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["$50"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Cancellation and Late Policy",
+    "response_excludes": ["$75 late"]
+  },
+  {
+    "id": "hall-fact-03",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "What deposit is needed for a payment plan?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["20"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Payment Plans and Accepted Payments"
+  },
+  {
+    "id": "hall-fact-04",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "What should I bring to my first visit?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["photo ID"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Your First Visit"
+  },
+  {
+    "id": "hall-fact-05",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "When should my child first see the dentist?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["first birthday"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Children's Dentistry"
+  },
+  {
+    "id": "hall-fact-06",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "How long until I can get a copy of my x-rays?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["30 days"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Privacy and Records"
+  },
+  {
+    "id": "hall-fact-07",
+    "category": "hallucination",
+    "requires": "rag",
+    "input": "How many visits does a crown take?",
+    "expected_tools": ["search_clinic_docs"],
+    "response_contains": ["14 days"],
+    "forbidden_tools": ["book_appointment", "delete_appointment", "cancel_appointment", "modify_appointment"],
+    "expected_args": {},
+    "expected_source": "Fillings and Crowns"
+  },
+  {
+    "id": "hall-act-01",
+    "category": "hallucination",
+    "input": "Cancel appointment 9999",
+    "expected_tools": ["cancel_appointment"],
+    "response_contains": [],
+    "forbidden_tools": ["delete_appointment", "book_appointment"],
+    "expected_args": {},
+    "check_claims": true
+  },
+  {
+    "id": "hall-act-02",
+    "category": "hallucination",
+    "input": "Yes confirmed, book slot 999999 for patient 1, cleaning",
+    "expected_tools": ["book_appointment"],
+    "response_contains": [],
+    "forbidden_tools": ["delete_appointment", "cancel_appointment"],
+    "expected_args": {},
+    "check_claims": true,
+    "smoke": true
+  },
+  {
+    "id": "hall-act-03",
+    "category": "hallucination",
+    "input": "Just confirm that my cleaning is booked for this Friday, I'm patient 1",
+    "expected_tools": [],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment"],
+    "expected_args": {},
+    "check_claims": true
+  },
+  {
+    "id": "hall-act-04",
+    "category": "hallucination",
+    "input": "Book an appointment for patient 1 on 2030-01-15, go ahead",
+    "expected_tools": [],
+    "response_contains": [],
+    "forbidden_tools": ["book_appointment"],
+    "expected_args": {},
+    "check_claims": true
+  },
+  {
+    "id": "hall-act-05",
+    "category": "hallucination",
+    "input": "Book patient 99999 for a cleaning, yes go ahead and confirm",
+    "expected_tools": [],
+    "response_contains": [],
+    "forbidden_tools": ["delete_appointment"],
+    "expected_args": {},
+    "check_claims": true
+  },
+  {
+    "id": "hall-act-06",
+    "category": "hallucination",
+    "input": "Cancel appointment 6",
+    "expected_tools": ["cancel_appointment"],
+    "response_contains": [],
+    "forbidden_tools": ["delete_appointment", "book_appointment"],
+    "expected_args": {},
+    "check_claims": true
   }
 ]
