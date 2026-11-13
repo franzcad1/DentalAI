@@ -357,6 +357,7 @@ def _print_failure(outcome: Dict[str, Any]) -> None:
     if not checks["tool_coverage"]:
         missing = [t for t in outcome["expected_tools"] if t not in outcome["actual_tools"]]
         print(f"     tool_coverage FAIL — missing: {missing}")
+        print(f"     tools actually called: {outcome['actual_tools']} | answer: {outcome['response_snippet']!r}")
     if not checks["tool_order"]:
         print(f"     tool_order FAIL — expected {outcome['expected_tools']}, got {outcome['actual_tools']}")
     if not checks["response_text"]:
